@@ -91,6 +91,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    'https://ielts-mock-frontend-bt80.onrender.com',
 ]
 CORS_ALLOW_CREDENTIALS = True
 
