@@ -60,7 +60,7 @@ class ReadingSubmitView(APIView):
         )
 
         from notifications.telegram import notify_reading
-        notify_reading(request.user, attempt)
+        notify_reading(request.user, attempt, time_info=request.data)
 
         return Response({
             'score': score,

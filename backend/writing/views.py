@@ -50,7 +50,7 @@ class WritingSubmitView(APIView):
         )
 
         from notifications.telegram import notify_writing
-        notify_writing(request.user, attempt)
+        notify_writing(request.user, attempt, time_info=request.data)
 
         return Response({
             'message': 'Muvaffaqiyatli topshirildi. Ustoz tekshiradi.',

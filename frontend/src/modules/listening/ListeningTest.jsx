@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import ScoreCard from '../../components/ScoreCard';
@@ -101,7 +101,7 @@ export default function ListeningTest() {
   const [started, setStarted] = useState(false);
   const [flagged, setFlagged] = useState(new Set());
   const [currentQ, setCurrentQ] = useState(null);
-  const questionRefs = {};
+  const startedAtRef = useRef(null);
 
   useEffect(() => {
     api.get(`/listening/${id}/`).then(r => {
@@ -115,20 +115,23 @@ export default function ListeningTest() {
     setCurrentQ(num);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (finishReason = 'manual') => {
     if (submitting) return;
     setSubmitting(true);
+    const timeSpent = startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : null;
     try {
-      const res = await api.post(`/listening/${id}/submit/`, { answers });
+      const res = await api.post(`/listening/${id}/submit/`, {
+        answers, time_spent: timeSpent, time_limit: 30 * 60, finish_reason: finishReason,
+      });
       setResult(res.data); window.scrollTo(0, 0);
     } catch { alert('Submission failed. Please try again.'); }
     finally { setSubmitting(false); }
   };
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
-    useAntiCheat({ active: started && !result, onBlocked: handleSubmit, testType: 'listening', testId: id });
+    useAntiCheat({ active: started && !result, onBlocked: () => handleSubmit('blocked'), testType: 'listening', testId: id });
 
-  const handleStart = async () => { await enterFullscreen(); setStarted(true); };
+  const handleStart = async () => { await enterFullscreen(); startedAtRef.current = Date.now(); setStarted(true); };
 
   useEffect(() => { if (result || blocked) exitFullscreen(); }, [result, blocked]);
 
@@ -175,7 +178,7 @@ export default function ListeningTest() {
           <h2 style={{ fontSize: 18, fontWeight: 700 }}>{test.title}</h2>
           <div className="text-muted" style={{ marginTop: 2 }}>{answered}/{total} answered</div>
         </div>
-        <Timer minutes={30} onExpire={handleSubmit} />
+        <Timer minutes={30} onExpire={() => handleSubmit('timeout')} />
       </div>
 
       {/* Progress bar */}
@@ -274,7 +277,7 @@ export default function ListeningTest() {
         <button onClick={() => navigate('/listening')} className="btn btn-outline">← Back</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="text-muted">{answered} of {total} answered</span>
-          <button onClick={handleSubmit} className="btn btn-primary" disabled={submitting} style={{ minWidth: 140, justifyContent: 'center' }}>
+          <button onClick={() => handleSubmit()} className="btn btn-primary" disabled={submitting} style={{ minWidth: 140, justifyContent: 'center' }}>
             {submitting ? 'Submitting...' : 'Submit Test ✓'}
           </button>
         </div>

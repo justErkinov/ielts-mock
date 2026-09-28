@@ -106,6 +106,7 @@ export default function ReadingTest() {
   const [hlColor, setHlColor] = useState('yellow'); // 'yellow' | 'red'
   const [flagged, setFlagged] = useState(new Set());
   const [currentQ, setCurrentQ] = useState(null);
+  const startedAtRef = useRef(null);
 
   useEffect(() => {
     api.get(`/reading/${id}/`).then(r => {
@@ -135,20 +136,23 @@ export default function ReadingTest() {
     setFlagged(prev => { const next = new Set(prev); next.has(num) ? next.delete(num) : next.add(num); return next; });
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (finishReason = 'manual') => {
     if (submitting) return;
     setSubmitting(true);
+    const timeSpent = startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : null;
     try {
-      const res = await api.post(`/reading/${id}/submit/`, { answers });
+      const res = await api.post(`/reading/${id}/submit/`, {
+        answers, time_spent: timeSpent, time_limit: 60 * 60, finish_reason: finishReason,
+      });
       setResult(res.data); window.scrollTo(0, 0);
     } catch { alert('Submission failed. Please try again.'); }
     finally { setSubmitting(false); }
   };
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
-    useAntiCheat({ active: started && !result, onBlocked: handleSubmit, testType: 'reading', testId: id });
+    useAntiCheat({ active: started && !result, onBlocked: () => handleSubmit('blocked'), testType: 'reading', testId: id });
 
-  const handleStart = async () => { await enterFullscreen(); setStarted(true); };
+  const handleStart = async () => { await enterFullscreen(); startedAtRef.current = Date.now(); setStarted(true); };
   useEffect(() => { if (result || blocked) exitFullscreen(); }, [result, blocked]);
 
   const goToQuestion = (num) => {
@@ -181,7 +185,7 @@ export default function ReadingTest() {
           <h2 style={{ fontSize: 18, fontWeight: 700 }}>{test.title}</h2>
           <div className="text-muted" style={{ marginTop: 2 }}>{answered}/{allQ.length} answered</div>
         </div>
-        <Timer minutes={60} onExpire={handleSubmit} />
+        <Timer minutes={60} onExpire={() => handleSubmit('timeout')} />
       </div>
 
       {/* Progress */}
@@ -320,7 +324,7 @@ export default function ReadingTest() {
         <button onClick={() => navigate('/reading')} className="btn btn-outline">← Back</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="text-muted">{answered} of {allQ.length} answered</span>
-          <button onClick={handleSubmit} className="btn btn-primary" disabled={submitting} style={{ minWidth: 140, justifyContent: 'center' }}>
+          <button onClick={() => handleSubmit()} className="btn btn-primary" disabled={submitting} style={{ minWidth: 140, justifyContent: 'center' }}>
             {submitting ? 'Submitting...' : 'Submit Test ✓'}
           </button>
         </div>

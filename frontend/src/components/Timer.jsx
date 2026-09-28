@@ -1,17 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function Timer({ minutes, onExpire }) {
   const [secs, setSecs] = useState(minutes * 60);
 
+  // Always keep the latest onExpire — otherwise the timer would call a stale
+  // version captured at mount time and submit empty answers on timeout.
+  const onExpireRef = useRef(onExpire);
+  useEffect(() => { onExpireRef.current = onExpire; });
+
+  const firedRef = useRef(false);
+
   useEffect(() => {
     const iv = setInterval(() => {
-      setSecs(p => {
-        if (p <= 1) { clearInterval(iv); onExpire?.(); return 0; }
-        return p - 1;
-      });
+      setSecs(p => (p <= 1 ? 0 : p - 1));
     }, 1000);
     return () => clearInterval(iv);
   }, []);
+
+  useEffect(() => {
+    if (secs === 0 && !firedRef.current) {
+      firedRef.current = true;
+      onExpireRef.current?.();
+    }
+  }, [secs]);
 
   const m = Math.floor(secs / 60).toString().padStart(2, '0');
   const s = (secs % 60).toString().padStart(2, '0');

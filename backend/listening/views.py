@@ -60,7 +60,7 @@ class ListeningSubmitView(APIView):
 
         # Telegram ga yuborish — faqat shu qatorni chaqiramiz
         from notifications.telegram import notify_listening
-        notify_listening(request.user, attempt)
+        notify_listening(request.user, attempt, time_info=request.data)
 
         return Response({
             'score': score,

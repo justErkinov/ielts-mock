@@ -60,6 +60,7 @@ export default function WritingTest() {
   const [submitted, setSubmitted] = useState(false);
   const [activeTask, setActiveTask] = useState(1);
   const [started, setStarted] = useState(false);
+  const startedAtRef = useRef(null);
 
   useEffect(() => {
     api.get(`/writing/${id}/`).then(r => setTest(r.data)).finally(() => setLoading(false));
@@ -69,7 +70,13 @@ export default function WritingTest() {
   const t1Timer = useTaskTimer(TASK1_MINS, started && activeTask === 1 && !submitted);
   const t2Timer = useTaskTimer(TASK2_MINS, started && activeTask === 2 && !submitted);
 
-  const activeTimer = activeTask === 1 ? t1Timer : t2Timer;
+  const timeInfo = (finishReason) => ({
+    time_spent: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : null,
+    time_limit: (TASK1_MINS + TASK2_MINS) * 60,
+    task1_time: TASK1_MINS * 60 - t1Timer.secs,
+    task2_time: TASK2_MINS * 60 - t2Timer.secs,
+    finish_reason: finishReason,
+  });
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -77,17 +84,17 @@ export default function WritingTest() {
     if (wc(task2) < MIN2) { alert(`Task 2 must be at least ${MIN2} words. Currently: ${wc(task2)}`); return; }
     setSubmitting(true);
     try {
-      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2 });
+      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo('manual') });
       setSubmitted(true); window.scrollTo(0, 0);
     } catch { alert('Submission failed. Please try again.'); }
     finally { setSubmitting(false); }
   };
 
-  const forceSubmit = async () => {
+  const forceSubmit = async (finishReason = 'timeout') => {
     if (submitting || submitted) return;
     setSubmitting(true);
     try {
-      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2 });
+      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo(finishReason) });
       setSubmitted(true);
     } catch {}
     finally { setSubmitting(false); }
@@ -99,14 +106,14 @@ export default function WritingTest() {
       setActiveTask(2);
     }
     if (started && activeTask === 2 && t2Timer.isExpired) {
-      forceSubmit();
+      forceSubmit('timeout');
     }
   }, [t1Timer.isExpired, t2Timer.isExpired, started]);
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
-    useAntiCheat({ active: started && !submitted, onBlocked: forceSubmit, testType: 'writing', testId: id });
+    useAntiCheat({ active: started && !submitted, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id });
 
-  const handleStart = async () => { await enterFullscreen(); setStarted(true); };
+  const handleStart = async () => { await enterFullscreen(); startedAtRef.current = Date.now(); setStarted(true); };
 
   useEffect(() => { if (submitted || blocked) exitFullscreen(); }, [submitted, blocked]);
 
