@@ -6,11 +6,9 @@ import Timer from '../../components/Timer';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
 
-// Renders question_text like "The carer needs a ___ break" as text + inline input
 function GapLine({ text, value, onChange, qNumber, answered }) {
   const parts = text.split('___');
   if (parts.length === 1) {
-    // No blank marker — render as plain line with input below
     return (
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 14, marginBottom: 6 }}>{text}</div>
@@ -46,6 +44,52 @@ function GapLine({ text, value, onChange, qNumber, answered }) {
   );
 }
 
+// Savol navigatsiyasi pastda
+function QuestionNav({ questions, answers, flagged, currentQ, onGoTo, onFlag }) {
+  return (
+    <div style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 150,
+      background: 'var(--card)', borderTop: '1px solid var(--border)',
+      padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'
+    }}>
+      <span style={{ fontSize: 11, color: 'var(--text2)', flexShrink: 0 }}>Q:</span>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
+        {questions.map(q => {
+          const num = q.question_number;
+          const isAnswered = !!answers[num];
+          const isFlagged = flagged.has(num);
+          const isCurrent = currentQ === num;
+          return (
+            <button
+              key={num}
+              onClick={() => onGoTo(num)}
+              style={{
+                width: 28, height: 28, borderRadius: 5, border: 'none',
+                cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                background: isCurrent ? 'var(--primary)' :
+                            isFlagged ? '#f4a300' :
+                            isAnswered ? '#22c55e' : 'var(--bg2)',
+                color: (isCurrent || isFlagged || isAnswered) ? '#fff' : 'var(--text2)',
+                outline: isCurrent ? '2px solid var(--primary)' : 'none',
+                outlineOffset: 2,
+              }}
+            >
+              {num}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 4, fontSize: 10, color: 'var(--text2)' }}>
+          <span style={{ background: '#22c55e', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>✓ Done</span>
+          <span style={{ background: '#f4a300', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>🚩 Flag</span>
+          <span style={{ background: 'var(--primary)', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>▶ Now</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ListeningTest() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -54,13 +98,22 @@ export default function ListeningTest() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [started, setStarted] = useState(false); // fullscreen gate passed
+  const [started, setStarted] = useState(false);
+  const [flagged, setFlagged] = useState(new Set());
+  const [currentQ, setCurrentQ] = useState(null);
+  const questionRefs = {};
 
   useEffect(() => {
-    api.get(`/listening/${id}/`).then(r => setTest(r.data)).finally(() => setLoading(false));
+    api.get(`/listening/${id}/`).then(r => {
+      setTest(r.data);
+      if (r.data.questions?.length > 0) setCurrentQ(r.data.questions[0].question_number);
+    }).finally(() => setLoading(false));
   }, [id]);
 
-  const handleAnswer = (num, val) => setAnswers(p => ({ ...p, [num]: val }));
+  const handleAnswer = (num, val) => {
+    setAnswers(p => ({ ...p, [num]: val }));
+    setCurrentQ(num);
+  };
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -75,14 +128,23 @@ export default function ListeningTest() {
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
     useAntiCheat({ active: started && !result, onBlocked: handleSubmit, testType: 'listening', testId: id });
 
-  const handleStart = async () => {
-    await enterFullscreen();
-    setStarted(true);
+  const handleStart = async () => { await enterFullscreen(); setStarted(true); };
+
+  useEffect(() => { if (result || blocked) exitFullscreen(); }, [result, blocked]);
+
+  const goToQuestion = (num) => {
+    setCurrentQ(num);
+    const el = document.getElementById(`q-${num}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  useEffect(() => {
-    if (result || blocked) exitFullscreen();
-  }, [result, blocked]);
+  const toggleFlag = (num) => {
+    setFlagged(prev => {
+      const next = new Set(prev);
+      next.has(num) ? next.delete(num) : next.add(num);
+      return next;
+    });
+  };
 
   if (loading) return <div className="container"><p className="text-muted">Loading test...</p></div>;
   if (!test) return <div className="container"><p>Test not found.</p></div>;
@@ -92,10 +154,10 @@ export default function ListeningTest() {
 
   const answered = Object.keys(answers).length;
   const total = test.questions?.length || 0;
+  const allQuestions = test.questions || [];
 
-  // Group questions by group_title (consecutive questions sharing same group go together)
   const groups = [];
-  (test.questions || []).forEach(q => {
+  allQuestions.forEach(q => {
     const last = groups[groups.length - 1];
     if (last && last.title === (q.group_title || '') && last.instruction === (q.group_instruction || '')) {
       last.items.push(q);
@@ -105,7 +167,7 @@ export default function ListeningTest() {
   });
 
   return (
-    <div className="container">
+    <div className="container" style={{ paddingBottom: 80 }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -133,13 +195,11 @@ export default function ListeningTest() {
         </div>
       )}
 
-      {/* Question groups — IELTS style with shared instructions */}
+      {/* Question groups */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((g, gi) => (
           <div key={gi}>
-            {g.title && (
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{g.title}</h3>
-            )}
+            {g.title && <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{g.title}</h3>}
             {g.instruction && (
               <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.6 }}>
                 {g.instruction.split(/(ONE WORD AND\/OR A NUMBER|ONE WORD ONLY|NO MORE THAN \w+ WORDS?)/i).map((part, i) =>
@@ -149,13 +209,31 @@ export default function ListeningTest() {
                 )}
               </p>
             )}
-
-            {/* Notes-style card containing all questions in this group */}
-            <div className="card" style={{ background: 'var(--card)' }}>
+            <div className="card">
               {g.items.map(q => (
-                <div key={q.id} style={{ marginBottom: 14 }}>
+                <div key={q.id} id={`q-${q.question_number}`}
+                  style={{
+                    marginBottom: 14, borderLeft: currentQ === q.question_number ? '3px solid var(--primary)' : '3px solid transparent',
+                    paddingLeft: 8, scrollMarginTop: 80,
+                  }}
+                  onClick={() => setCurrentQ(q.question_number)}
+                >
+                  {/* Flag tugmasi */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleFlag(q.question_number); }}
+                      style={{
+                        background: flagged.has(q.question_number) ? '#f4a300' : 'var(--bg2)',
+                        color: flagged.has(q.question_number) ? '#fff' : 'var(--text2)',
+                        border: 'none', borderRadius: 5, padding: '2px 8px', fontSize: 11, cursor: 'pointer'
+                      }}
+                    >
+                      🚩 {flagged.has(q.question_number) ? 'Flagged' : 'Flag'}
+                    </button>
+                  </div>
+
                   {q.question_type === 'mcq' && q.options ? (
-                    <div style={{ marginBottom: 4 }}>
+                    <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                         <span style={{
                           width: 20, height: 20, borderRadius: '50%',
@@ -168,7 +246,12 @@ export default function ListeningTest() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 28 }}>
                         {q.options.map((opt, i) => (
-                          <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: answers[q.question_number] === opt ? 'var(--primary-light)' : 'transparent', border: `1px solid ${answers[q.question_number] === opt ? 'var(--primary)' : 'transparent'}` }}>
+                          <label key={opt} style={{
+                            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                            padding: '6px 10px', borderRadius: 6,
+                            background: answers[q.question_number] === opt ? 'var(--primary-light)' : 'transparent',
+                            border: `1px solid ${answers[q.question_number] === opt ? 'var(--primary)' : 'transparent'}`
+                          }}>
                             <input type="radio" name={`q_${q.question_number}`} value={opt} checked={answers[q.question_number] === opt} onChange={() => handleAnswer(q.question_number, opt)} style={{ display: 'none' }} />
                             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', minWidth: 16 }}>{String.fromCharCode(65 + i)}.</span>
                             <span style={{ fontSize: 13 }}>{opt}</span>
@@ -177,13 +260,7 @@ export default function ListeningTest() {
                       </div>
                     </div>
                   ) : (
-                    <GapLine
-                      text={q.question_text}
-                      value={answers[q.question_number]}
-                      onChange={v => handleAnswer(q.question_number, v)}
-                      qNumber={q.question_number}
-                      answered={!!answers[q.question_number]}
-                    />
+                    <GapLine text={q.question_text} value={answers[q.question_number]} onChange={v => handleAnswer(q.question_number, v)} qNumber={q.question_number} answered={!!answers[q.question_number]} />
                   )}
                 </div>
               ))}
@@ -192,8 +269,8 @@ export default function ListeningTest() {
         ))}
       </div>
 
-      {/* Footer */}
-      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      {/* Submit */}
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <button onClick={() => navigate('/listening')} className="btn btn-outline">← Back</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span className="text-muted">{answered} of {total} answered</span>
@@ -206,6 +283,16 @@ export default function ListeningTest() {
       {warning && (
         <ViolationWarning count={warning.count} max={3} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
       )}
+
+      {/* Savol navigatsiyasi */}
+      <QuestionNav
+        questions={allQuestions}
+        answers={answers}
+        flagged={flagged}
+        currentQ={currentQ}
+        onGoTo={goToQuestion}
+        onFlag={toggleFlag}
+      />
     </div>
   );
 }
