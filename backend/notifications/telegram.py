@@ -4,19 +4,30 @@ from django.utils import timezone
 
 
 def _send(text):
+    """Sends in a background thread with retries, so a slow Telegram API
+    never blocks the student's request."""
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         print("Telegram credentials not configured!")
         return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-            timeout=5
-        )
-    except Exception as e:
-        print(f"Telegram error: {e}")
+
+    def worker():
+        import time
+        for attempt in range(3):
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                    timeout=(10, 30),
+                )
+                return
+            except Exception as e:
+                print(f"Telegram error (attempt {attempt + 1}/3): {e}")
+                time.sleep(3)
+
+    import threading
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _tashkent(dt=None, with_seconds=False):
