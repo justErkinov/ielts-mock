@@ -136,6 +136,9 @@ export default function WritingTest() {
   );
 
   const w1 = wc(task1), w2 = wc(task2);
+  const t1ImgMatch = (test.task1_question || '').match(/\[img:([^\]]+)\]/);
+  const t1Img = test.task1_image || (t1ImgMatch && t1ImgMatch[1]);
+  const t1Text = (test.task1_question || '').replace(/\[img:[^\]]+\]\s*/, '');
 
   return (
     <div className="container">
@@ -190,16 +193,16 @@ export default function WritingTest() {
 
       {/* Task 1 */}
       {activeTask === 1 && (
-        <div style={{ display: 'grid', gridTemplateColumns: test.task1_image ? '1fr 1fr' : '1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: t1Img ? '1fr 1fr' : '1fr', gap: 16 }}>
           <div>
-            {test.task1_image && (
-              <div className="card" style={{ marginBottom: 12, padding: 12 }}>
-                <img src={test.task1_image} alt="Task 1 chart" style={{ width: '100%', borderRadius: 7, maxHeight: 280, objectFit: 'contain' }} />
+            {t1Img && (
+              <div className="card" style={{ marginBottom: 12, padding: 12, background: '#fff' }}>
+                <img src={t1Img} alt="Task 1 chart" style={{ width: '100%', borderRadius: 7, maxHeight: 280, objectFit: 'contain' }} />
               </div>
             )}
             <div className="card" style={{ background: 'var(--primary-light)', border: '1px solid var(--primary)22' }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Task 1 — Question</div>
-              <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)' }}>{test.task1_question}</p>
+              <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{t1Text}</p>
               <div style={{ marginTop: 10, padding: '6px 10px', background: 'var(--card)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
                 Write at least <strong>150 words</strong> · Recommended time: <strong>20 min</strong>
               </div>

@@ -203,9 +203,13 @@ export default function ListeningTest() {
         {groups.map((g, gi) => (
           <div key={gi}>
             {g.title && <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{g.title}</h3>}
+            {(g.instruction.match(/\[img:([^\]]+)\]/) || [])[1] && (
+              <img src={g.instruction.match(/\[img:([^\]]+)\]/)[1]} alt={g.title || 'Diagram'}
+                style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 14, border: '1px solid var(--border)', background: '#fff' }} />
+            )}
             {g.instruction && (
               <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.6 }}>
-                {g.instruction.split(/(ONE WORD AND\/OR A NUMBER|ONE WORD ONLY|NO MORE THAN \w+ WORDS?)/i).map((part, i) =>
+                {g.instruction.replace(/\[img:[^\]]+\]\s*/, '').split(/(ONE WORD AND\/OR A NUMBER|ONE WORD ONLY|NO MORE THAN \w+ WORDS?)/i).map((part, i) =>
                   /ONE WORD|NO MORE THAN/i.test(part)
                     ? <strong key={i} style={{ color: 'var(--text)' }}>{part}</strong>
                     : <span key={i}>{part}</span>
