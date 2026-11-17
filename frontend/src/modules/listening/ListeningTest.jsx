@@ -288,7 +288,7 @@ export default function ListeningTest() {
       </div>
 
       {warning && (
-        <ViolationWarning count={warning.count} max={3} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
+        <ViolationWarning count={warning.count} max={3} deadline={warning.deadline} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
       )}
 
       {/* Savol navigatsiyasi */}

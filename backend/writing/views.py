@@ -34,13 +34,10 @@ class WritingSubmitView(APIView):
         except WritingTest.DoesNotExist:
             return Response({'error': 'Topilmadi'}, status=404)
 
-        task1 = request.data.get('task1_text', '').strip()
-        task2 = request.data.get('task2_text', '').strip()
-
-        if not task1 or not task2:
-            return Response(
-                {'error': 'Task 1 va Task 2 bo\'sh bo\'lmasin'}, status=400
-            )
+        # Empty tasks are accepted on purpose: whatever the student wrote
+        # (even only Task 2, or nothing on timeout) must reach the teacher.
+        task1 = (request.data.get('task1_text') or '').strip()
+        task2 = (request.data.get('task2_text') or '').strip()
 
         attempt = WritingAttempt.objects.create(
             user=request.user,

@@ -1,147 +1,198 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import api from '../services/api';
 
-const MAX_VIOLATIONS = 3;
+export const MAX_VIOLATIONS = 3;
+export const GRACE_SECONDS = 5;
+
+const ALLOWED_KEYS = new Set([
+  'Backspace', 'Delete', 'Enter', 'Tab', 'Shift', 'Control', 'CapsLock',
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'Home', 'End', 'PageUp', 'PageDown',
+]);
+
+const isEditable = (el) =>
+  !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
 /**
- * Anti-cheat hook for exam pages.
+ * Exam lockdown for Listening / Reading / Writing.
  *
- * Detects and blocks:
- *  - Leaving fullscreen
- *  - Switching tabs / apps (visibilitychange)
- *  - Losing window focus, e.g. Alt+Tab (blur)
- *  - Right-click context menu (which enables "Search with Google" etc.)
- *  - Copy / cut of exam content
- *  - DevTools shortcuts (F12, Ctrl+Shift+I/J/C, Ctrl+U)
- *  - Print (Ctrl+P)
+ * Silently blocked (no warning, nothing happens):
+ *   right-click, copy/cut/paste, dragging text, and every key that is not
+ *   needed for typing (F1–F12, Esc, Ctrl/Alt/Win shortcuts, Print Screen...).
+ *   Letters, numbers, punctuation, Space, Backspace, Delete, Enter, Tab and
+ *   arrows keep working. Ctrl+Z / Ctrl+Y / Ctrl+A work inside answer boxes.
  *
- * Each detected action is reported to the backend immediately (so the
- * teacher's Telegram gets a live violation alert), counted locally, and
- * shown to the student as a warning. On the MAX_VIOLATIONS-th violation,
- * onBlocked() fires so the caller can auto-submit and lock the test.
+ * Counted as violations (warning + Telegram alert):
+ *   leaving fullscreen, switching tab/app, the window losing focus.
+ *   The student then has GRACE_SECONDS to press "Return to test";
+ *   otherwise — or on the MAX_VIOLATIONS-th violation — the test is
+ *   submitted and locked via onBlocked().
+ *
+ * In Chrome, fullscreen + Keyboard Lock also captures Esc and most system
+ * shortcuts, so a single Esc press no longer exits fullscreen.
  */
 export function useAntiCheat({ active, onBlocked, testType, testId }) {
   const [violations, setViolations] = useState(0);
-  const [warning, setWarning] = useState(null); // { count, reason } | null
+  const [warning, setWarning] = useState(null); // { count, reason, deadline } | null
   const [blocked, setBlocked] = useState(false);
-  const blockedRef = useRef(false);
-  const lastViolationAt = useRef(0);
 
-  const reportToServer = useCallback((reason, count) => {
+  const activeRef = useRef(active);
+  const blockedRef = useRef(false);
+  const warningRef = useRef(null);
+  const countRef = useRef(0);
+  const lastAt = useRef(0);
+  const onBlockedRef = useRef(onBlocked);
+
+  useEffect(() => { activeRef.current = active; }, [active]);
+  // Always call the latest onBlocked, so auto-submit sends the latest answers
+  useEffect(() => { onBlockedRef.current = onBlocked; });
+
+  const report = useCallback((reason, count) => {
     api.post('/users/report-violation/', {
-      test_type: testType,
-      test_id: testId,
-      reason,
-      count,
-    }).catch(() => { /* best effort — never block the UI on this */ });
+      test_type: testType, test_id: testId, reason, count,
+    }).catch(() => {});
   }, [testType, testId]);
 
+  const block = useCallback((reason) => {
+    if (blockedRef.current) return;
+    blockedRef.current = true;
+    warningRef.current = null;
+    setWarning(null);
+    setBlocked(true);
+    onBlockedRef.current?.(reason);
+  }, []);
+
   const registerViolation = useCallback((reason) => {
-    if (!active || blockedRef.current) return;
-
-    // Debounce: some actions (e.g. fullscreen-exit + blur) fire together.
+    if (!activeRef.current || blockedRef.current) return;
+    // While a warning is already open the student is still "away" — count once
+    if (warningRef.current) return;
     const now = Date.now();
-    if (now - lastViolationAt.current < 1200) return;
-    lastViolationAt.current = now;
+    if (now - lastAt.current < 1500) return; // fullscreen-exit + blur fire together
+    lastAt.current = now;
 
-    setViolations(prev => {
-      const next = prev + 1;
-      reportToServer(reason, next);
-      if (next >= MAX_VIOLATIONS) {
-        blockedRef.current = true;
-        setBlocked(true);
-        setWarning(null);
-        onBlocked?.(reason);
-      } else {
-        setWarning({ count: next, reason });
+    const next = countRef.current + 1;
+    countRef.current = next;
+    setViolations(next);
+    report(reason, next);
+
+    if (next >= MAX_VIOLATIONS) {
+      block(reason);
+    } else {
+      const w = { count: next, reason, deadline: now + GRACE_SECONDS * 1000 };
+      warningRef.current = w;
+      setWarning(w);
+    }
+  }, [report, block]);
+
+  // Grace period: no "Return to test" click within GRACE_SECONDS -> removed
+  useEffect(() => {
+    if (!warning) return;
+    const t = setTimeout(() => {
+      if (warningRef.current === warning) {
+        report('warning_ignored', MAX_VIOLATIONS);
+        block('warning_ignored');
       }
-      return next;
-    });
-  }, [active, onBlocked, reportToServer]);
+    }, Math.max(0, warning.deadline - Date.now()));
+    return () => clearTimeout(t);
+  }, [warning, report, block]);
 
   useEffect(() => {
     if (!active) return;
 
-    const handleVisibility = () => {
-      if (document.hidden) registerViolation('tab_switch');
-    };
-    const handleBlur = () => {
-      registerViolation('window_blur');
-    };
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) registerViolation('fullscreen_exit');
-    };
-    // Right-click opens the context menu, which offers "Search with Google",
-    // "Inspect", etc. Block it outright during the exam.
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-      registerViolation('right_click');
-    };
-    // Block copy/cut so question text can't be pasted elsewhere (e.g. into an AI tool).
-    const handleCopy = (e) => {
-      e.preventDefault();
-      registerViolation('copy_attempt');
-    };
-    const handleCut = (e) => {
-      e.preventDefault();
-      registerViolation('copy_attempt');
-    };
-    // Block common devtools / print shortcuts.
-    const handleKeyDown = (e) => {
-      const blockedCombo =
-        e.key === 'F12' ||
-        (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) ||
-        (e.ctrlKey && ['u', 'U', 'p', 'P', 's', 'S'].includes(e.key));
-      if (blockedCombo) {
-        e.preventDefault();
-        registerViolation('devtools_attempt');
+    const onVisibility = () => { if (document.hidden) registerViolation('tab_switch'); };
+    const onBlur = () => registerViolation('window_blur');
+    const onFullscreen = () => {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        registerViolation('fullscreen_exit');
       }
     };
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const onCopy = (e) => { if (!isEditable(e.target)) stop(e); };
 
-    document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('blur', handleBlur);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('copy', handleCopy);
-    document.addEventListener('cut', handleCut);
-    document.addEventListener('keydown', handleKeyDown);
+    const onKeyDown = (e) => {
+      const k = e.key;
+      // AltGr letters on some layouts arrive as Ctrl+Alt+<char>
+      if (k && k.length === 1 && e.getModifierState && e.getModifierState('AltGraph')) return;
+
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        if (k === 'Control' || k === 'Shift') return;
+        const lower = (k || '').toLowerCase();
+        if (isEditable(e.target) && (e.ctrlKey || e.metaKey) && !e.altKey
+            && (lower === 'z' || lower === 'y' || lower === 'a')) return;
+        stop(e);
+        return;
+      }
+      if (k && k.length === 1) return; // letters, digits, punctuation, space
+      if (ALLOWED_KEYS.has(k)) return;
+      stop(e); // F1–F12, Escape, Meta/Win, Alt, PrintScreen, ContextMenu...
+    };
+
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    const onPopState = () => { window.history.pushState(null, '', window.location.href); };
+    window.history.pushState(null, '', window.location.href);
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    document.addEventListener('webkitfullscreenchange', onFullscreen);
+    document.addEventListener('contextmenu', stop, true);
+    document.addEventListener('copy', onCopy, true);
+    document.addEventListener('cut', stop, true);
+    document.addEventListener('paste', stop, true);
+    document.addEventListener('dragstart', stop, true);
+    document.addEventListener('drop', stop, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('popstate', onPopState);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('blur', handleBlur);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('copy', handleCopy);
-      document.removeEventListener('cut', handleCut);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+      document.removeEventListener('webkitfullscreenchange', onFullscreen);
+      document.removeEventListener('contextmenu', stop, true);
+      document.removeEventListener('copy', onCopy, true);
+      document.removeEventListener('cut', stop, true);
+      document.removeEventListener('paste', stop, true);
+      document.removeEventListener('dragstart', stop, true);
+      document.removeEventListener('drop', stop, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('popstate', onPopState);
     };
   }, [active, registerViolation]);
 
   const enterFullscreen = useCallback(async () => {
     try {
       const el = document.documentElement;
-      if (el.requestFullscreen) await el.requestFullscreen();
-      else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      if (!document.fullscreenElement) {
+        if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      }
+      // Chrome: capture Esc and system shortcuts while in fullscreen
+      if (navigator.keyboard && navigator.keyboard.lock) {
+        await navigator.keyboard.lock().catch(() => {});
+      }
     } catch {
-      // Some browsers require a direct user gesture — the Start button provides that.
+      // Needs a direct click — the Start / Return buttons provide it
     }
   }, []);
 
   const exitFullscreen = useCallback(() => {
+    try { navigator.keyboard && navigator.keyboard.unlock && navigator.keyboard.unlock(); } catch {}
     if (document.fullscreenElement && document.exitFullscreen) {
       document.exitFullscreen().catch(() => {});
     }
   }, []);
 
-  const dismissWarning = useCallback(() => setWarning(null), []);
+  const dismissWarning = useCallback(() => {
+    warningRef.current = null;
+    lastAt.current = Date.now(); // ignore the blur/focus noise caused by re-entering fullscreen
+    setWarning(null);
+  }, []);
 
   return {
-    violations,
-    warning,
-    blocked,
-    dismissWarning,
-    enterFullscreen,
-    exitFullscreen,
-    maxViolations: MAX_VIOLATIONS,
+    violations, warning, blocked, dismissWarning,
+    enterFullscreen, exitFullscreen, maxViolations: MAX_VIOLATIONS,
   };
 }

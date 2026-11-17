@@ -1,53 +1,89 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { GRACE_SECONDS, MAX_VIOLATIONS } from '../hooks/useAntiCheat';
+
 /**
- * Two overlays used together with useAntiCheat:
- *
- * <FullscreenGate>  — shown before the test starts; blocks until the
- *                      student clicks "Start in Fullscreen".
- * <ViolationWarning> — shown each time a violation is detected (not the final one).
- * <BlockedScreen>    — shown once MAX_VIOLATIONS is reached; test is locked.
+ * Overlays used with useAntiCheat:
+ *  <FullscreenGate>   — exam rules + "Start" button (starts fullscreen)
+ *  <ViolationWarning> — shown after a violation, with a GRACE_SECONDS countdown
+ *  <BlockedScreen>    — test submitted and locked
+ * Exam screens always use a light, official-looking palette.
  */
 
-export function FullscreenGate({ onStart }) {
+const backdrop = {
+  position: 'fixed', inset: 0, zIndex: 3000, display: 'flex',
+  alignItems: 'center', justifyContent: 'center', padding: 20,
+  fontFamily: 'Arial, Helvetica, sans-serif',
+};
+const box = {
+  background: '#fff', color: '#111827', borderRadius: 12, width: '100%',
+  boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
+};
+
+export function FullscreenGate({ onStart, title }) {
+  const navigate = useNavigate();
+  const rules = [
+    'The test opens in fullscreen. Stay on this screen until you submit.',
+    'Right-click, copying and keyboard shortcuts are disabled. Only typing keys work.',
+    'Leaving fullscreen or switching to another window gives a warning. You then have ' +
+      `${GRACE_SECONDS} seconds to press "Return to test".`,
+    `After ${MAX_VIOLATIONS} warnings, or if you do not return in time, your test is submitted automatically.`,
+  ];
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-    }}>
-      <div className="card" style={{ maxWidth: 460, textAlign: 'center', padding: 36 }}>
-        <div style={{ fontSize: 40, marginBottom: 14 }}>🔒</div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 10 }}>Exam Mode</h2>
-        <p style={{ fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.7, marginBottom: 20 }}>
-          This test runs in fullscreen mode. Switching tabs, opening other windows,
-          or exiting fullscreen will be recorded as a violation. After <strong>3 violations</strong>,
-          your test will be automatically submitted and locked.
+    <div style={{ ...backdrop, background: '#f3f4f6' }}>
+      <div style={{ ...box, maxWidth: 520, padding: '30px 30px 24px' }}>
+        <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>
+          Exam mode
         </p>
-        <button onClick={onStart} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: 11 }}>
-          Start in Fullscreen →
+        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>{title || 'Before you start'}</h2>
+        <ol style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+          {rules.map(r => <li key={r} style={{ fontSize: 14, lineHeight: 1.55, color: '#374151' }}>{r}</li>)}
+        </ol>
+        <button onClick={onStart} style={{
+          width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8,
+          padding: '13px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+        }}>
+          I am ready — start the test
+        </button>
+        <button onClick={() => navigate(-1)} style={{
+          width: '100%', marginTop: 8, background: 'transparent', color: '#6b7280', border: 'none',
+          padding: 8, fontSize: 13, cursor: 'pointer',
+        }}>
+          ← Go back
         </button>
       </div>
     </div>
   );
 }
 
-export function ViolationWarning({ count, max, onDismiss }) {
+export function ViolationWarning({ count, max = MAX_VIOLATIONS, onDismiss, deadline }) {
+  const [end] = useState(() => deadline || Date.now() + GRACE_SECONDS * 1000);
+  const [left, setLeft] = useState(Math.ceil((end - Date.now()) / 1000));
+
+  useEffect(() => {
+    const iv = setInterval(() => setLeft(Math.max(0, Math.ceil((end - Date.now()) / 1000))), 200);
+    return () => clearInterval(iv);
+  }, [end]);
+
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-    }}>
-      <div className="card" style={{ maxWidth: 420, textAlign: 'center', padding: 32, border: '1px solid var(--accent)' }}>
-        <div style={{ fontSize: 38, marginBottom: 12 }}>⚠️</div>
-        <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8, color: 'var(--accent)' }}>
-          Warning {count}/{max}
-        </h2>
-        <p style={{ fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 20 }}>
-          You left the test screen. This has been recorded.
-          {count === max - 1
-            ? ' One more violation will submit your test automatically and lock your account from this test.'
-            : ' Please stay on this page and remain in fullscreen until you submit.'}
+    <div style={{ ...backdrop, background: 'rgba(17,24,39,0.75)' }}>
+      <div style={{ ...box, maxWidth: 440, padding: 30, textAlign: 'center', borderTop: '6px solid #dc2626' }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          Warning {count} of {max}
         </p>
-        <button onClick={onDismiss} className="btn btn-danger" style={{ width: '100%', justifyContent: 'center', padding: 10 }}>
-          I Understand — Return to Test
+        <h2 style={{ fontSize: 20, fontWeight: 700, margin: '8px 0 10px' }}>You left the test screen</h2>
+        <p style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.55 }}>
+          Your teacher has been notified. Return now, or your test will be submitted automatically.
+        </p>
+        <div style={{ fontSize: 56, fontWeight: 800, color: '#dc2626', margin: '14px 0 4px', fontVariantNumeric: 'tabular-nums' }}>
+          {left}
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 18 }}>seconds left</p>
+        <button onClick={onDismiss} style={{
+          width: '100%', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8,
+          padding: '13px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+        }}>
+          Return to test
         </button>
       </div>
     </div>
@@ -56,21 +92,18 @@ export function ViolationWarning({ count, max, onDismiss }) {
 
 export function BlockedScreen({ onBack }) {
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1001,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-    }}>
-      <div className="card" style={{ maxWidth: 460, textAlign: 'center', padding: 36, border: '1px solid var(--accent)' }}>
-        <div style={{ fontSize: 44, marginBottom: 14 }}>🚫</div>
-        <h2 style={{ fontSize: 19, fontWeight: 700, marginBottom: 10, color: 'var(--accent)' }}>
-          Test Locked
-        </h2>
-        <p style={{ fontSize: 13.5, color: 'var(--text2)', lineHeight: 1.7, marginBottom: 20 }}>
-          You exceeded the maximum number of violations (leaving the test screen 3 times).
-          Your answers up to this point have been automatically submitted and sent to your teacher.
+    <div style={{ ...backdrop, background: '#f3f4f6' }}>
+      <div style={{ ...box, maxWidth: 460, padding: 34, textAlign: 'center', borderTop: '6px solid #dc2626' }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, color: '#dc2626' }}>Test submitted and locked</h2>
+        <p style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.6, marginBottom: 22 }}>
+          You left the test screen too many times, or did not return in time.
+          Your answers up to this point have been submitted and sent to your teacher.
         </p>
-        <button onClick={onBack} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
-          Back to Tests
+        <button onClick={onBack} style={{
+          width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8,
+          padding: '12px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+        }}>
+          Back to tests
         </button>
       </div>
     </div>

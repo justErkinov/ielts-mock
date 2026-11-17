@@ -4,8 +4,10 @@ from django.utils import timezone
 
 
 def _send(text):
-    """Sends in a background thread with retries, so a slow Telegram API
-    never blocks the student's request."""
+    """Sends in a background thread with retries, so a slow or failing
+    Telegram API never blocks the student's request. If Telegram rejects
+    the Markdown (e.g. a student essay contains * or _), the message is
+    re-sent as plain text instead of being lost."""
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:
@@ -14,17 +16,20 @@ def _send(text):
 
     def worker():
         import time
-        for attempt in range(3):
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "Markdown"}
+        for attempt in range(5):
             try:
-                requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-                    timeout=(10, 30),
-                )
-                return
+                r = requests.post(url, json=payload, timeout=(10, 30))
+                if r.ok:
+                    return
+                print(f"Telegram API {r.status_code} (attempt {attempt + 1}/5): {r.text[:200]}")
+                if r.status_code == 400 and "parse_mode" in payload:
+                    payload.pop("parse_mode")
+                    continue
             except Exception as e:
-                print(f"Telegram error (attempt {attempt + 1}/3): {e}")
-                time.sleep(3)
+                print(f"Telegram error (attempt {attempt + 1}/5): {e}")
+            time.sleep(5 * (attempt + 1))
 
     import threading
     threading.Thread(target=worker, daemon=True).start()
@@ -143,10 +148,13 @@ def notify_reading(user, attempt, time_info=None):
 
 
 def notify_writing(user, attempt, time_info=None):
-    t1 = (attempt.task1_text[:700] + '...') if len(attempt.task1_text) > 700 else attempt.task1_text
-    t2 = (attempt.task2_text[:900] + '...') if len(attempt.task2_text) > 900 else attempt.task2_text
-    w1 = len(attempt.task1_text.split())
-    w2 = len(attempt.task2_text.split())
+    def task_block(label, text, min_words, limit):
+        words = len(text.split())
+        if not text:
+            return f"📌 *{label}* — ⚠️ *NOT WRITTEN (0 words)*"
+        short = f" ⚠️ under {min_words}" if words < min_words else ""
+        body = (text[:limit] + '...') if len(text) > limit else text
+        return f"📌 *{label}* ({words} words{short}):\n{body}"
 
     task_times = ""
     if time_info:
@@ -163,8 +171,8 @@ def notify_writing(user, attempt, time_info=None):
         f"📝 Test: {attempt.test.title}"
         f"{_time_block(time_info)}"
         f"{task_times}\n\n"
-        f"📌 *Task 1* ({w1} words):\n{t1}\n\n"
-        f"📌 *Task 2* ({w2} words):\n{t2}\n\n"
+        f"{task_block('Task 1', attempt.task1_text or '', 150, 1500)}\n\n"
+        f"{task_block('Task 2', attempt.task2_text or '', 250, 2000)}\n\n"
         f"⏳ _Awaiting teacher review_"
     )
 
@@ -175,6 +183,7 @@ REASON_LABELS = {
     'fullscreen_exit': 'Exited fullscreen mode',
     'right_click': 'Right-clicked (context menu / Search with Google)',
     'copy_attempt': 'Tried to copy/cut exam content',
+    'warning_ignored': 'Did not return to the test within 5 seconds',
     'devtools_attempt': 'Tried to open DevTools / print / save page',
 }
 

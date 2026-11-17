@@ -60,6 +60,8 @@ export default function WritingTest() {
   const [submitted, setSubmitted] = useState(false);
   const [activeTask, setActiveTask] = useState(1);
   const [started, setStarted] = useState(false);
+  const [confirm, setConfirm] = useState(null); // list of problems before submit
+  const [error, setError] = useState('');
   const startedAtRef = useRef(null);
 
   useEffect(() => {
@@ -78,15 +80,27 @@ export default function WritingTest() {
     finish_reason: finishReason,
   });
 
-  const handleSubmit = async () => {
+  // Short or empty tasks are allowed — the student just confirms first,
+  // and whatever was written is always sent to the teacher.
+  const handleSubmit = () => {
     if (submitting) return;
-    if (wc(task1) < MIN1) { alert(`Task 1 must be at least ${MIN1} words. Currently: ${wc(task1)}`); return; }
-    if (wc(task2) < MIN2) { alert(`Task 2 must be at least ${MIN2} words. Currently: ${wc(task2)}`); return; }
+    const problems = [];
+    const n1 = wc(task1), n2 = wc(task2);
+    if (n1 === 0) problems.push('Task 1 is empty.');
+    else if (n1 < MIN1) problems.push(`Task 1 has ${n1} words (minimum ${MIN1}).`);
+    if (n2 === 0) problems.push('Task 2 is empty.');
+    else if (n2 < MIN2) problems.push(`Task 2 has ${n2} words (minimum ${MIN2}).`);
+    if (problems.length) { setConfirm(problems); return; }
+    doSubmit();
+  };
+
+  const doSubmit = async () => {
+    setConfirm(null);
     setSubmitting(true);
     try {
       await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo('manual') });
       setSubmitted(true); window.scrollTo(0, 0);
-    } catch { alert('Submission failed. Please try again.'); }
+    } catch { setError('Submission failed. Check the internet connection and press Submit again.'); }
     finally { setSubmitting(false); }
   };
 
@@ -263,8 +277,31 @@ export default function WritingTest() {
         </div>
       </div>
 
+      {(confirm || error) && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(17,24,39,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#fff', color: '#111827', borderRadius: 12, padding: 26, maxWidth: 420, width: '100%', fontFamily: 'Arial, sans-serif' }}>
+            <h3 style={{ fontSize: 19, marginBottom: 10 }}>{error ? 'Could not submit' : 'Submit anyway?'}</h3>
+            {error
+              ? <p style={{ fontSize: 14.5, color: '#4b5563' }}>{error}</p>
+              : <ul style={{ paddingLeft: 18, fontSize: 14.5, color: '#4b5563', lineHeight: 1.6 }}>{confirm.map(p => <li key={p}>{p}</li>)}</ul>}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => { setConfirm(null); setError(''); }}
+                style={{ border: '1px solid #d1d5db', background: '#fff', borderRadius: 7, padding: '9px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                {error ? 'OK' : 'Keep writing'}
+              </button>
+              {!error && (
+                <button onClick={doSubmit}
+                  style={{ border: 'none', background: '#dc2626', color: '#fff', borderRadius: 7, padding: '9px 18px', fontWeight: 600, cursor: 'pointer' }}>
+                  Submit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {warning && (
-        <ViolationWarning count={warning.count} max={3} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
+        <ViolationWarning count={warning.count} max={3} deadline={warning.deadline} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
       )}
     </div>
   );

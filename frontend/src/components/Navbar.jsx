@@ -22,6 +22,9 @@ export default function Navbar() {
     { path: '/writing', label: 'Writing' },
   ];
 
+  // No menu on exam pages: students must not navigate away mid-test
+  if (/^\/(listening|reading|writing)\/[^/]+/.test(location.pathname)) return null;
+
   return (
     <nav style={{
       background: 'var(--card)',
