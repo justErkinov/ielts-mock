@@ -58,3 +58,42 @@ class ListeningSubmitView(APIView):
 
         return Response({'score': score, 'total': questions.count(),
                          'detail': result_detail, 'attempt_id': attempt.id})
+
+
+class ListeningGroupSubmitView(APIView):
+    """
+    Submits a whole Listening test (Part 1-4 stored as separate ListeningTest
+    rows) in one request: {"parts": {"<test_id>": {"<q_no>": "answer"}}, ...timing}.
+    Creates one attempt per part and sends ONE Telegram message with the total.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        parts = request.data.get('parts') or {}
+        tests = list(ListeningTest.objects.filter(pk__in=[int(k) for k in parts.keys() if str(k).isdigit()]))
+        if not tests:
+            return Response({'error': 'No tests submitted'}, status=400)
+
+        score = total = 0
+        detail = {}
+        part_scores = []
+        for test in sorted(tests, key=lambda t: t.title):
+            answers = parts.get(str(test.pk)) or {}
+            part_score = 0
+            questions = list(test.questions.all())
+            for q in questions:
+                num = str(q.question_number)
+                given = answers.get(num, '')
+                ok = check(given, q.correct_answer)
+                part_score += ok
+                detail[num] = {'your_answer': given, 'correct_answer': display(q.correct_answer), 'is_correct': ok}
+            ListeningAttempt.objects.create(user=request.user, test=test, answers=answers, score=part_score)
+            part_scores.append((test.title, part_score, len(questions)))
+            score += part_score
+            total += len(questions)
+
+        from notifications.telegram import notify_listening_group
+        notify_listening_group(request.user, part_scores, score, total, time_info=request.data)
+
+        detail = dict(sorted(detail.items(), key=lambda kv: int(kv[0])))
+        return Response({'score': score, 'total': total, 'detail': detail})

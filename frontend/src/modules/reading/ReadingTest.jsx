@@ -5,53 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import ScoreCard from '../../components/ScoreCard';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
-
-/* ------------------------------------------------------------------ */
-/* Highlights                                                          */
-/* Stored as non-overlapping character ranges per text piece.          */
-/* A new highlight replaces whatever it overlaps, so re-highlighting   */
-/* the same words can never duplicate text.                            */
-/* ------------------------------------------------------------------ */
-
-function addRange(list, nr) {
-  const out = [];
-  for (const r of list) {
-    if (r.end <= nr.start || r.start >= nr.end) { out.push(r); continue; }
-    if (r.start < nr.start) out.push({ ...r, end: nr.start });
-    if (r.end > nr.end) out.push({ ...r, start: nr.end });
-  }
-  out.push(nr);
-  out.sort((a, b) => a.start - b.start);
-  const merged = [];
-  for (const r of out) {
-    const last = merged[merged.length - 1];
-    if (last && last.color === r.color && last.end >= r.start) last.end = Math.max(last.end, r.end);
-    else merged.push({ ...r });
-  }
-  return merged;
-}
-
-const HL_COLORS = { yellow: '#fde68a', red: '#fca5a5' };
-
-function HLText({ id, text, ranges = [], onRemove }) {
-  const segs = [];
-  let cur = 0;
-  ranges.forEach((r, i) => {
-    if (r.start > cur) segs.push({ t: text.slice(cur, r.start) });
-    segs.push({ t: text.slice(r.start, r.end), r, i });
-    cur = r.end;
-  });
-  if (cur < text.length) segs.push({ t: text.slice(cur) });
-  return (
-    <span data-hl={id}>
-      {segs.map((s, k) => s.r
-        ? <mark key={k} className="rx-mark" style={{ background: HL_COLORS[s.r.color] }}
-            onClick={() => { if (window.getSelection().isCollapsed) onRemove(id, s.r); }}
-            title="Click to remove">{s.t}</mark>
-        : <span key={k}>{s.t}</span>)}
-    </span>
-  );
-}
+import { addRange, HL_COLORS, HLText, EXAM_CSS } from '../../components/examKit';
 
 /* ------------------------------------------------------------------ */
 /* Question grouping (real IELTS layout: "Questions 1–7" + instructions) */
@@ -299,7 +253,7 @@ export default function ReadingTest() {
   if (blocked) return <BlockedScreen onBack={() => navigate('/reading')} />;
   if (result) return (
     <div className="container">
-      <ScoreCard title={test.title} score={result.score} total={result.total} detail={result.detail}
+      <ScoreCard kind="reading" title={test.title} score={result.score} total={result.total} detail={result.detail}
         onBack={() => navigate('/reading')} />
     </div>
   );
@@ -366,7 +320,7 @@ export default function ReadingTest() {
 
   return (
     <div className="rx-root" onMouseUp={onMouseUp}>
-      <style>{CSS}</style>
+      <style>{EXAM_CSS}</style>
 
       {/* Header */}
       <header className="rx-header">
@@ -532,95 +486,3 @@ export default function ReadingTest() {
     </div>
   );
 }
-
-/* Official exam look: white, grey, black, red accent, Arial. Always light. */
-const CSS = `
-.rx-root{position:fixed;inset:0;z-index:500;display:flex;flex-direction:column;background:#fff;color:#111827;
-  font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5}
-.rx-root *{box-sizing:border-box}
-.rx-header{height:52px;flex-shrink:0;display:flex;align-items:center;gap:24px;padding:0 20px;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-.rx-brand{color:#dc2626;font-weight:800;font-size:22px;letter-spacing:.03em}
-.rx-taker{font-size:13px;color:#6b7280}
-.rx-taker b{color:#111827}
-.rx-title{flex:1;text-align:center;font-size:13px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rx-timer{display:flex;align-items:center;gap:6px;font-family:'Courier New',monospace;font-weight:700;font-size:16px;
-  background:#f3f4f6;color:#374151;padding:5px 12px;border-radius:8px}
-.rx-timer-low{background:#fee2e2;color:#dc2626}
-.rx-main{flex:1;display:flex;min-height:0}
-.rx-left,.rx-right{overflow-y:auto;padding:22px 26px}
-.rx-right{flex:1}
-.rx-divider{width:9px;flex-shrink:0;background:#e5e7eb;cursor:col-resize;display:flex;align-items:center;justify-content:center}
-.rx-divider:hover{background:#d1d5db}
-.rx-divider span{width:3px;height:34px;border-radius:2px;background:#9ca3af}
-.rx-partbox{background:#f3f4f6;border-radius:6px;padding:14px 16px;margin-bottom:20px}
-.rx-partbox p{font-size:14px;color:#374151;margin-top:4px}
-.rx-ptitle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
-.rx-ptitle h2{font-size:19px;font-weight:700}
-.rx-hint{font-size:12px;color:#4b5563;background:#eff6ff;padding:4px 10px;border-radius:999px}
-.rx-passage p{text-align:justify;line-height:1.75;margin-bottom:14px;white-space:pre-wrap}
-.rx-plabel{display:block;font-size:16px;margin-bottom:2px}
-.rx-mark{color:#111827;cursor:pointer;border-radius:2px;padding:1px 0}
-.rx-mark:hover{outline:1px dashed #dc2626}
-.rx-group{margin-bottom:30px}
-.rx-group h3{font-size:16px;font-weight:700;margin-bottom:6px}
-.rx-instr{font-size:14px;color:#374151;margin-bottom:4px}
-.rx-legend{margin:6px 0 14px;font-size:13.5px;border-collapse:collapse}
-.rx-legend td{padding:2px 14px 2px 0;vertical-align:top}
-.rx-notes{border:1px solid #d1d5db;border-radius:6px;padding:14px 16px;margin-top:10px}
-.rx-gapline{line-height:2.4;font-size:14.5px;scroll-margin:90px}
-.rx-bullet{color:#6b7280}
-.rx-gap{width:150px;height:30px;margin:0 6px;border:1px solid #9ca3af;border-radius:4px;padding:0 8px;font-size:14.5px;
-  text-align:center;font-family:inherit;background:#fff;color:#111827;vertical-align:middle}
-.rx-gap::placeholder{color:#9ca3af;font-weight:700}
-.rx-gap:focus,.rx-gap-cur{outline:none;border:2px solid #2563eb}
-.rx-q{padding:10px 12px;margin:6px -12px;border-radius:6px;scroll-margin:90px}
-.rx-q-cur{background:#f8fafc;box-shadow:inset 3px 0 0 #2563eb}
-.rx-stem{font-size:14.5px;display:flex;gap:8px;align-items:flex-start}
-.rx-num{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:22px;padding:0 4px;border:1px solid #111827;
-  border-radius:3px;font-size:12.5px;font-weight:700;flex-shrink:0;margin-top:1px}
-.rx-opts{display:flex;flex-direction:column;gap:4px;margin:8px 0 0 34px}
-.rx-opt{display:flex;align-items:flex-start;gap:9px;font-size:14px;padding:5px 8px;border-radius:5px;cursor:pointer}
-.rx-opt:hover{background:#f3f4f6}
-.rx-opt-on{background:#eff6ff}
-.rx-opt input{margin-top:3px;accent-color:#111827;width:15px;height:15px}
-.rx-letter{min-width:14px}
-.rx-box{border:1px solid #d1d5db;border-radius:6px;padding:12px 16px;margin:10px 0 14px}
-.rx-box>b{display:block;margin-bottom:6px;font-size:14px}
-.rx-boxrow{display:flex;gap:10px;font-size:14px;padding:2px 0}
-.rx-boxrow b{min-width:30px}
-.rx-sel{display:flex;align-items:center;gap:10px;padding:7px 12px;margin:2px -12px;border-radius:6px;font-size:14.5px;scroll-margin:90px}
-.rx-sel-label{flex:1}
-.rx-sel select{min-width:72px;height:30px;border:1px solid #9ca3af;border-radius:4px;background:#fff;color:#111827;font-size:14px;padding:0 6px}
-.rx-sel select:focus{outline:none;border:2px solid #2563eb}
-.rx-arrows{position:fixed;right:18px;bottom:66px;display:flex;gap:8px;z-index:510}
-.rx-arrows button{width:42px;height:42px;border:none;border-radius:6px;background:#e5e7eb;color:#111827;font-size:24px;cursor:pointer}
-.rx-arrows .rx-arrow-next{background:#111827;color:#fff}
-.rx-arrows button:disabled{opacity:.35;cursor:default}
-.rx-footer{height:54px;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:0 16px;border-top:1px solid #e5e7eb;background:#fff}
-.rx-parts{flex:1;display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0;overflow-x:auto}
-.rx-part-on{display:flex;align-items:center;gap:5px}
-.rx-part-on>b{font-size:15px;margin-right:6px;white-space:nowrap}
-.rx-part-off{background:none;border:none;font-size:15px;color:#9ca3af;cursor:pointer;white-space:nowrap;font-family:inherit}
-.rx-part-off span{margin-left:8px;font-size:14px}
-.rx-part-off:hover{color:#374151}
-.rx-n{width:28px;height:28px;border:1px solid #d1d5db;border-radius:4px;background:#fff;color:#4b5563;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
-.rx-n:hover{border-color:#6b7280}
-.rx-n.rx-n-done{background:#16a34a;border-color:#16a34a;color:#fff}
-.rx-n.rx-n-cur{border:2px solid #2563eb;color:#111827;background:#fff}
-.rx-submit{background:#dc2626;color:#fff;border:none;border-radius:6px;padding:0 22px;height:36px;font-size:14px;font-weight:700;cursor:pointer}
-.rx-submit:hover{background:#b91c1c}
-.rx-submit:disabled{opacity:.6}
-.rx-toolbar{position:fixed;transform:translateX(-50%);z-index:520;display:flex;gap:4px;background:#fff;border:1px solid #e5e7eb;
-  border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:4px}
-.rx-toolbar button{display:flex;align-items:center;gap:6px;border:none;background:none;padding:6px 10px;border-radius:5px;
-  font-size:13px;font-weight:600;cursor:pointer;color:#111827;font-family:inherit}
-.rx-toolbar button:hover{background:#f3f4f6}
-.rx-toolbar i{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.1)}
-.rx-modal-bg{position:fixed;inset:0;z-index:2000;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:20px}
-.rx-modal{background:#fff;border-radius:12px;padding:26px;width:100%;max-width:420px;box-shadow:0 24px 64px rgba(0,0,0,.25)}
-.rx-modal h3{font-size:19px;margin-bottom:8px}
-.rx-modal p{font-size:14.5px;color:#4b5563;line-height:1.55}
-.rx-modal-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
-.rx-modal-btns button{border:1px solid #d1d5db;background:#fff;border-radius:7px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer}
-.rx-modal-btns .rx-danger{background:#dc2626;border-color:#dc2626;color:#fff}
-`;

@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
+import { useAuth } from '../../context/AuthContext';
+import { EXAM_CSS, ZoomableImage } from '../../components/examKit';
 
 const MIN1 = 150, MIN2 = 250;
 const TASK1_MINS = 20, TASK2_MINS = 40;
@@ -52,6 +54,9 @@ function useTaskTimer(minutes, active) {
 export default function WritingTest() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [split, setSplit] = useState(50);
+  const dragRef = useRef(false);
   const [test, setTest] = useState(null);
   const [task1, setTask1] = useState('');
   const [task2, setTask2] = useState('');
@@ -131,10 +136,19 @@ export default function WritingTest() {
 
   useEffect(() => { if (submitted || blocked) exitFullscreen(); }, [submitted, blocked]);
 
+  // resizable divider between the task and the answer box
+  useEffect(() => {
+    const move = e => { if (dragRef.current) setSplit(Math.min(70, Math.max(30, (e.clientX / window.innerWidth) * 100))); };
+    const up = () => { dragRef.current = false; document.body.style.cursor = ''; };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  }, []);
+
   if (loading) return <div className="container"><p className="text-muted">Loading...</p></div>;
   if (!test) return <div className="container"><p>Test not found.</p></div>;
   if (blocked) return <BlockedScreen onBack={() => navigate('/writing')} />;
-  if (!started) return <FullscreenGate onStart={handleStart} />;
+  if (!started) return <FullscreenGate title={test.title} onStart={handleStart} />;
 
   if (submitted) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 56px)' }}>
@@ -153,155 +167,91 @@ export default function WritingTest() {
   const t1ImgMatch = (test.task1_question || '').match(/\[img:([^\]]+)\]/);
   const t1Img = test.task1_image || (t1ImgMatch && t1ImgMatch[1]);
   const t1Text = (test.task1_question || '').replace(/\[img:[^\]]+\]\s*/, '');
+  const isT1 = activeTask === 1;
+  const words = isT1 ? w1 : w2;
+  const min = isT1 ? MIN1 : MIN2;
+
+  const timerBox = (n, tm) => (
+    <div className={`rx-timer ${activeTask === n && tm.low ? 'rx-timer-low' : ''} ${activeTask !== n ? 'wx-timer-paused' : ''}`}
+      title={activeTask === n ? 'Running' : 'Paused'}>
+      Task {n} · {tm.display}{activeTask !== n && tm.secs > 0 ? ' · paused' : ''}
+    </div>
+  );
 
   return (
-    <div className="container">
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 4 }}>Writing Test</div>
-          <h2 style={{ fontSize: 18, fontWeight: 700 }}>{test.title}</h2>
-        </div>
-        {/* Alohida timer */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{
-            padding: '6px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-            background: activeTask === 1 ? (t1Timer.low ? '#fee2e2' : 'var(--primary-light)') : 'var(--bg2)',
-            color: activeTask === 1 ? (t1Timer.low ? '#dc2626' : 'var(--primary)') : 'var(--text2)',
-            border: `1px solid ${activeTask === 1 ? (t1Timer.low ? '#fca5a5' : 'var(--border)') : 'var(--border)'}`,
-          }}>
-            ⏱ T1: {t1Timer.display}
-            {t1Timer.warning5 && activeTask === 1 && <span style={{ marginLeft: 6, fontSize: 11 }}>⚠️</span>}
-          </div>
-          <div style={{
-            padding: '6px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600,
-            background: activeTask === 2 ? (t2Timer.low ? '#fee2e2' : 'var(--primary-light)') : 'var(--bg2)',
-            color: activeTask === 2 ? (t2Timer.low ? '#dc2626' : 'var(--primary)') : 'var(--text2)',
-            border: `1px solid ${activeTask === 2 ? (t2Timer.low ? '#fca5a5' : 'var(--border)') : 'var(--border)'}`,
-          }}>
-            ⏱ T2: {t2Timer.display}
-            {t2Timer.warning5 && activeTask === 2 && <span style={{ marginLeft: 6, fontSize: 11 }}>⚠️</span>}
-          </div>
-        </div>
-      </div>
+    <div className="rx-root">
+      <style>{EXAM_CSS}</style>
+      <header className="rx-header">
+        <div className="rx-brand">IELTS</div>
+        <div className="rx-taker">Test taker: <b>{user?.first_name || user?.username}</b></div>
+        <div className="rx-title">{test.title}</div>
+        <div style={{ display: 'flex', gap: 8 }}>{timerBox(1, t1Timer)}{timerBox(2, t2Timer)}</div>
+      </header>
 
-      {/* Pauza xabari */}
-      {started && (
-        <div style={{ marginBottom: 12, padding: '6px 12px', background: 'var(--yellow-bg)', borderRadius: 8, fontSize: 12, color: 'var(--text2)' }}>
-          ⏸ Task {activeTask === 1 ? 2 : 1} vaqti <strong>pauza</strong>da — faqat aktiv task vaqti ketadi.
-        </div>
-      )}
+      <main className="rx-main">
+        <section className="rx-left" style={{ width: `${split}%` }}>
+          <div className="rx-partbox">
+            <b>Part {activeTask}</b>
+            <p>You should spend about {isT1 ? 20 : 40} minutes on this task. Write at least {min} words.</p>
+          </div>
+          <div className="wx-prompt">{isT1 ? t1Text : test.task2_question}</div>
+          {isT1 && t1Img && <ZoomableImage src={t1Img} alt="Task 1 diagram" height={460} />}
+        </section>
 
-      {/* Task tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {[1, 2].map(n => (
-          <button key={n} onClick={() => setActiveTask(n)} className={`btn ${activeTask === n ? 'btn-primary' : 'btn-outline'}`}>
-            Task {n}
-            <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.8 }}>
-              {n === 1 ? `${w1}/${MIN1}` : `${w2}/${MIN2}`} words
-            </span>
-            {((n === 1 && w1 >= MIN1) || (n === 2 && w2 >= MIN2)) && <span style={{ marginLeft: 4 }}>✓</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* Task 1 */}
-      {activeTask === 1 && (
-        <div style={{ display: 'grid', gridTemplateColumns: t1Img ? '1fr 1fr' : '1fr', gap: 16 }}>
-          <div>
-            {t1Img && (
-              <div className="card" style={{ marginBottom: 12, padding: 12, background: '#fff' }}>
-                <img src={t1Img} alt="Task 1 chart" style={{ width: '100%', borderRadius: 7, maxHeight: 280, objectFit: 'contain' }} />
-              </div>
-            )}
-            <div className="card" style={{ background: 'var(--primary-light)', border: '1px solid var(--primary)22' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Task 1 — Question</div>
-              <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{t1Text}</p>
-              <div style={{ marginTop: 10, padding: '6px 10px', background: 'var(--card)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-                Write at least <strong>150 words</strong> · Recommended time: <strong>20 min</strong>
-              </div>
-            </div>
-          </div>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-              <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text2)' }}>Your Response</label>
-              <span style={{ fontSize: 12, fontWeight: 600, color: w1 >= MIN1 ? 'var(--green)' : 'var(--text2)' }}>
-                {w1} words {w1 >= MIN1 ? '✓' : `(need ${MIN1 - w1} more)`}
-              </span>
-            </div>
-            <div style={{ height: 6, background: 'var(--bg2)', borderRadius: 4, marginBottom: 10, overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min((w1 / MIN1) * 100, 100)}%`, height: '100%', background: w1 >= MIN1 ? 'var(--green)' : 'var(--primary)', borderRadius: 4, transition: 'width 0.3s' }} />
-            </div>
-            <textarea value={task1} onChange={e => setTask1(e.target.value)} rows={16} className="inp" style={{ resize: 'vertical', lineHeight: 1.75 }} placeholder="Write your Task 1 response here..." />
-          </div>
+        <div className="rx-divider" onMouseDown={e => { e.preventDefault(); dragRef.current = true; document.body.style.cursor = 'col-resize'; }}>
+          <span />
         </div>
-      )}
 
-      {/* Task 2 */}
-      {activeTask === 2 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div className="card" style={{ background: 'var(--primary-light)', border: '1px solid var(--primary)22' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Task 2 — Question</div>
-            <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)' }}>{test.task2_question}</p>
-            <div style={{ marginTop: 10, padding: '6px 10px', background: 'var(--card)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-              Write at least <strong>250 words</strong> · Recommended time: <strong>40 min</strong>
-            </div>
+        <section className="rx-right wx-right">
+          <textarea
+            key={activeTask}
+            className="wx-text"
+            value={isT1 ? task1 : task2}
+            onChange={e => (isT1 ? setTask1 : setTask2)(e.target.value)}
+            placeholder={`Write your Task ${activeTask} answer here…`}
+            spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="off"
+          />
+          <div className="wx-count">
+            <span>Words: <b className={words >= min ? 'wx-ok' : ''}>{words}</b> / {min}+</span>
+            <span>{words >= min ? 'Minimum reached ✓' : `${min - words} more to reach the minimum`}</span>
           </div>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-              <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text2)' }}>Your Response</label>
-              <span style={{ fontSize: 12, fontWeight: 600, color: w2 >= MIN2 ? 'var(--green)' : 'var(--text2)' }}>
-                {w2} words {w2 >= MIN2 ? '✓' : `(need ${MIN2 - w2} more)`}
-              </span>
-            </div>
-            <div style={{ height: 6, background: 'var(--bg2)', borderRadius: 4, marginBottom: 10, overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min((w2 / MIN2) * 100, 100)}%`, height: '100%', background: w2 >= MIN2 ? 'var(--green)' : 'var(--primary)', borderRadius: 4, transition: 'width 0.3s' }} />
-            </div>
-            <textarea value={task2} onChange={e => setTask2(e.target.value)} rows={18} className="inp" style={{ resize: 'vertical', lineHeight: 1.75 }} placeholder="Write your Task 2 response here..." />
-          </div>
-        </div>
-      )}
+        </section>
+      </main>
 
-      {/* Footer */}
-      <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <button onClick={() => navigate('/writing')} className="btn btn-outline">← Back</button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-            T1: <span style={{ color: w1 >= MIN1 ? 'var(--green)' : 'var(--text2)', fontWeight: 600 }}>{w1}w</span>
-            {' · '}
-            T2: <span style={{ color: w2 >= MIN2 ? 'var(--green)' : 'var(--text2)', fontWeight: 600 }}>{w2}w</span>
-          </div>
-          <button onClick={handleSubmit} className="btn btn-primary" disabled={submitting} style={{ minWidth: 140, justifyContent: 'center' }}>
-            {submitting ? 'Submitting...' : 'Submit Test ✓'}
-          </button>
+      <footer className="rx-footer">
+        <div className="rx-parts" style={{ justifyContent: 'flex-start', gap: 28 }}>
+          {[1, 2].map(n => {
+            const w = n === 1 ? w1 : w2, m = n === 1 ? MIN1 : MIN2;
+            return activeTask === n ? (
+              <div key={n} className="rx-part-on"><b>Part {n}</b><span style={{ fontSize: 14, color: w >= m ? '#16a34a' : '#6b7280' }}>{w} words</span></div>
+            ) : (
+              <button key={n} className="rx-part-off" onClick={() => setActiveTask(n)}>Part {n} <span>{w} words</span></button>
+            );
+          })}
         </div>
-      </div>
+        <button className="rx-submit" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </footer>
 
       {(confirm || error) && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(17,24,39,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div style={{ background: '#fff', color: '#111827', borderRadius: 12, padding: 26, maxWidth: 420, width: '100%', fontFamily: 'Arial, sans-serif' }}>
-            <h3 style={{ fontSize: 19, marginBottom: 10 }}>{error ? 'Could not submit' : 'Submit anyway?'}</h3>
+        <div className="rx-modal-bg">
+          <div className="rx-modal">
+            <h3>{error ? 'Could not submit' : 'Submit anyway?'}</h3>
             {error
-              ? <p style={{ fontSize: 14.5, color: '#4b5563' }}>{error}</p>
+              ? <p>{error}</p>
               : <ul style={{ paddingLeft: 18, fontSize: 14.5, color: '#4b5563', lineHeight: 1.6 }}>{confirm.map(p => <li key={p}>{p}</li>)}</ul>}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
-              <button onClick={() => { setConfirm(null); setError(''); }}
-                style={{ border: '1px solid #d1d5db', background: '#fff', borderRadius: 7, padding: '9px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                {error ? 'OK' : 'Keep writing'}
-              </button>
-              {!error && (
-                <button onClick={doSubmit}
-                  style={{ border: 'none', background: '#dc2626', color: '#fff', borderRadius: 7, padding: '9px 18px', fontWeight: 600, cursor: 'pointer' }}>
-                  Submit
-                </button>
-              )}
+            <div className="rx-modal-btns">
+              <button onClick={() => { setConfirm(null); setError(''); }}>{error ? 'OK' : 'Keep writing'}</button>
+              {!error && <button className="rx-danger" onClick={doSubmit}>Submit</button>}
             </div>
           </div>
         </div>
       )}
 
       {warning && (
-        <ViolationWarning count={warning.count} max={3} deadline={warning.deadline} onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
+        <ViolationWarning count={warning.count} deadline={warning.deadline}
+          onDismiss={async () => { dismissWarning(); await enterFullscreen(); }} />
       )}
     </div>
   );

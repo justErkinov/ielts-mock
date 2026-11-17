@@ -48,6 +48,23 @@ def _band(pct):
             else 6.0 if pct >= 60 else 5.0 if pct >= 50 else 4.0 if pct >= 40 else 3.0)
 
 
+# Official IELTS raw-score -> band conversion (out of 40)
+_LISTENING_40 = [(39, 9.0), (37, 8.5), (35, 8.0), (32, 7.5), (30, 7.0), (26, 6.5), (23, 6.0),
+                 (18, 5.5), (16, 5.0), (13, 4.5), (10, 4.0), (8, 3.5), (6, 3.0), (4, 2.5)]
+_READING_40 = [(39, 9.0), (37, 8.5), (35, 8.0), (33, 7.5), (30, 7.0), (27, 6.5), (23, 6.0),
+               (19, 5.5), (15, 5.0), (13, 4.5), (10, 4.0), (8, 3.5), (6, 3.0), (4, 2.5)]
+
+
+def _band40(score, total, table):
+    """Official table for a full 40-question test; % estimate otherwise."""
+    if total != 40:
+        return _band(round(score / total * 100) if total else 0)
+    for minimum, band in table:
+        if score >= minimum:
+            return band
+    return 2.0 if score >= 2 else 1.0 if score >= 1 else 0.0
+
+
 def _int(value):
     """Safely read a number sent by the frontend; returns None if missing/invalid."""
     try:
@@ -142,8 +159,25 @@ def notify_reading(user, attempt, time_info=None):
         f"📝 Test: {attempt.test.title}\n\n"
         f"✅ Score: *{attempt.score} / {total_q}*\n"
         f"📊 Accuracy: *{pct}%*\n"
-        f"🎯 Est. Band: *{_band(pct):.1f}*"
+        f"🎯 Band: *{_band40(attempt.score, total_q, _READING_40):.1f}*"
         f"{_time_block(time_info, total_q, pct)}"
+    )
+
+
+def notify_listening_group(user, part_scores, score, total, time_info=None):
+    pct = round(score / total * 100) if total else 0
+    parts = "\n".join(f"   • {title.split(',')[-1].strip()}: {s} / {n}" for title, s, n in part_scores)
+    base = part_scores[0][0].rsplit(',', 1)[0] if part_scores else ''
+    _send(
+        f"🎧 *LISTENING RESULT*\n\n"
+        f"👤 Student: {user.get_full_name() or user.username}\n"
+        f"📅 Date: {_tashkent()}\n"
+        f"📝 Test: {base}\n\n"
+        f"✅ Score: *{score} / {total}*\n"
+        f"{parts}\n"
+        f"📊 Accuracy: *{pct}%*\n"
+        f"🎯 Band: *{_band40(score, total, _LISTENING_40):.1f}*"
+        f"{_time_block(time_info, total, pct)}"
     )
 
 

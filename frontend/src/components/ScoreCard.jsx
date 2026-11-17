@@ -1,7 +1,16 @@
-export default function ScoreCard({ title, score, total, detail, onBack }) {
+// Official IELTS raw score (out of 40) -> band
+const TABLES = {
+  listening: [[39, 9], [37, 8.5], [35, 8], [32, 7.5], [30, 7], [26, 6.5], [23, 6], [18, 5.5], [16, 5], [13, 4.5], [10, 4], [8, 3.5], [6, 3], [4, 2.5]],
+  reading: [[39, 9], [37, 8.5], [35, 8], [33, 7.5], [30, 7], [27, 6.5], [23, 6], [19, 5.5], [15, 5], [13, 4.5], [10, 4], [8, 3.5], [6, 3], [4, 2.5]],
+};
+
+export default function ScoreCard({ title, score, total, detail, onBack, kind }) {
   const pct = Math.round((score / total) * 100);
-  const band = pct >= 90 ? 9.0 : pct >= 80 ? 8.0 : pct >= 70 ? 7.0 :
-               pct >= 60 ? 6.0 : pct >= 50 ? 5.0 : pct >= 40 ? 4.0 : 3.0;
+  const row = total === 40 && TABLES[kind] ? TABLES[kind].find(([min]) => score >= min) : null;
+  const band = TABLES[kind] && total === 40
+    ? (row ? row[1] : score >= 2 ? 2 : score >= 1 ? 1 : 0)
+    : pct >= 90 ? 9.0 : pct >= 80 ? 8.0 : pct >= 70 ? 7.0 :
+      pct >= 60 ? 6.0 : pct >= 50 ? 5.0 : pct >= 40 ? 4.0 : 3.0;
 
   const correct = Object.values(detail).filter(d => d.is_correct).length;
   const wrong = total - correct;
