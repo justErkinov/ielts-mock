@@ -42,23 +42,8 @@ export default function Navbar() {
       {/* Logo */}
       <Link to="/" className="logo-area" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-        {/* AL-JABR shield icon — shield + bar chart + coins, like the real school logo */}
-        <div style={{ width: 34, height: 34, position: 'relative', flexShrink: 0 }}>
-          <svg viewBox="0 0 40 44" width="34" height="37">
-            {/* Shield outline */}
-            <path d="M20 2 L37 8 L37 24 Q37 36 20 42 Q3 36 3 24 L3 8 Z" fill="var(--primary)" opacity="0.12"/>
-            <path d="M20 3 L36 9 L36 24 Q36 35 20 41 Q4 35 4 24 L4 9 Z" fill="none" stroke="var(--primary)" strokeWidth="1.4"/>
-            {/* Bar chart with rising arrow */}
-            <rect x="11" y="20" width="3" height="8" fill="var(--accent)" opacity="0.85"/>
-            <rect x="15.5" y="16" width="3" height="12" fill="var(--accent)" opacity="0.85"/>
-            <rect x="20" y="12" width="3" height="16" fill="var(--accent)" opacity="0.85"/>
-            <path d="M10 19 L17 13 L22 16 L29 8" fill="none" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round"/>
-            <path d="M25 8 L29 8 L29 12" fill="none" stroke="var(--primary)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            {/* Coins stack */}
-            <ellipse cx="20" cy="31" rx="9" ry="2.6" fill="var(--accent)" opacity="0.9"/>
-            <ellipse cx="20" cy="28.5" rx="9" ry="2.6" fill="var(--primary)" opacity="0.55"/>
-          </svg>
-        </div>
+        <img src="/al-jabr-logo.png" alt="AL-JABR" width="40" height="40"
+          style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0 }} />
         <div style={{ minWidth: 92 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)', lineHeight: 1.1, transition: 'all 0.2s' }}>
             {hover ? 'AL-JABR' : 'IELTS Mock'}
