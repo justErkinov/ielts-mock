@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "listening",
     "reading",
     "writing",
+    "studio",
 ]
 
 MIDDLEWARE = [
@@ -85,6 +86,14 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Render sits behind an HTTPS proxy: build https:// links for uploaded files
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Teacher uploads (audio, images). With CLOUDINARY_URL set, files go to Cloudinary
+# (fast CDN, survives redeploys). Without it they are stored in the database.
+CLOUDINARY_URL = os.getenv("CLOUDINARY_URL", "")
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "40"))
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"

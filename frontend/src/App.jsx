@@ -10,6 +10,13 @@ import ReadingList from './modules/reading/ReadingList';
 import ReadingTest from './modules/reading/ReadingTest';
 import WritingList from './modules/writing/WritingList';
 import WritingTest from './modules/writing/WritingTest';
+import StudioHome from './modules/studio/StudioHome';
+import StudioEditor from './modules/studio/StudioEditor';
+
+function TeacherRoute({ children }) {
+  const { user } = useAuth();
+  return user && (user.is_teacher || user.is_superuser) ? children : <Navigate to="/" />;
+}
 
 function PrivateRoute({ children }) {
   const { user } = useAuth();
@@ -34,6 +41,8 @@ export default function App() {
                 <Route path="/reading/:id" element={<ReadingTest />} />
                 <Route path="/writing" element={<WritingList />} />
                 <Route path="/writing/:id" element={<WritingTest />} />
+                <Route path="/studio" element={<TeacherRoute><StudioHome /></TeacherRoute>} />
+                <Route path="/studio/:kind/:id" element={<TeacherRoute><StudioEditor /></TeacherRoute>} />
               </Routes>
             </>
           </PrivateRoute>

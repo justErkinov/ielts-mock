@@ -40,6 +40,9 @@ class ReadingQuestion(models.Model):
     question_text = models.TextField()
     options = models.JSONField(blank=True, null=True)
     correct_answer = models.CharField(max_length=300)
+    # Same grouping fields as Listening ("Questions 1-7" + its instructions)
+    group_title = models.CharField(max_length=200, blank=True, default='')
+    group_instruction = models.TextField(blank=True, default='')
 
     class Meta:
         ordering = ['question_number']

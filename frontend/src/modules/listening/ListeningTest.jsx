@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import ScoreCard from '../../components/ScoreCard';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
-import { EXAM_CSS, ZoomableImage, useHighlighter } from '../../components/examKit';
+import { EXAM_CSS, ZoomableImage, useHighlighter, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
 import { groupTests } from './groups';
 
 /*
@@ -22,14 +22,15 @@ const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.f
 
 function parseInstruction(raw = '') {
   const img = (raw.match(/\[img:([^\]]+)\]/) || [])[1];
-  const text = raw.replace(/\[img:[^\]]+\]\s*/, '').trim();
+  const box = (raw.match(/\[box:([^\]]*)\]/) || [])[1];
+  const text = raw.replace(/\[img:[^\]]+\]\s*/, '').replace(/\[box:[^\]]*\]\s*/, '').trim();
   const lr = text.match(/letter[s]?,?\s*([A-Z])\s*[-–]\s*([A-Z])/i);
   const letters = lr
     ? LETTERS.slice(LETTERS.indexOf(lr[1].toUpperCase()), LETTERS.indexOf(lr[2].toUpperCase()) + 1).split('')
     : null;
   // "Complete the notes below. Write ONE WORD..." -> separate lines
-  const lines = text.split(/(?<=\.)\s+(?=[A-Z])/).filter(Boolean);
-  return { img, lines, letters };
+  const lines = text.split('\n').flatMap(l => l.split(/(?<=\.)\s+(?=[A-Z])/)).map(l => l.trim()).filter(Boolean);
+  return { img, box, lines, letters };
 }
 
 function Instr({ line }) {
@@ -68,6 +69,7 @@ export default function ListeningTest() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const preview = isPreview(user);
   const { onMouseUp, toolbarEl, t } = useHighlighter();
 
   const [parts, setParts] = useState(null);
@@ -92,7 +94,7 @@ export default function ListeningTest() {
   const submittingRef = useRef(false);
 
   useEffect(() => {
-    api.get('/listening/').then(r => {
+    api.get(preview ? '/listening/?preview=1' : '/listening/').then(r => {
       const group = groupTests(r.data).find(g => g.parts.some(p => String(p.id) === String(id)));
       setParts(group ? group.parts : []);
       const q = group?.parts[0]?.questions?.[0];
@@ -106,6 +108,7 @@ export default function ListeningTest() {
 
   /* ---------- submit ---------- */
   const submit = useCallback(async (finishReason = 'manual') => {
+    if (preview) return;
     if (submittingRef.current || !parts) return;
     submittingRef.current = true;
     setSubmitting(true);
@@ -137,7 +140,7 @@ export default function ListeningTest() {
   submitRef.current = submit;
 
   const { warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } = useAntiCheat({
-    active: started && !result, onBlocked: () => submitRef.current('blocked'),
+    active: started && !result && !preview, onBlocked: () => submitRef.current('blocked'),
     testType: 'listening', testId: id,
   });
 
@@ -200,6 +203,7 @@ export default function ListeningTest() {
         score={result.score} total={result.total} detail={result.detail} onBack={() => navigate('/listening')} />
     </div>
   );
+  if (!started && preview) return <PreviewGate title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
   if (!started) return (
     <FullscreenGate title="Listening test — the recording plays once" onStart={async () => {
       await enterFullscreen(); startedAt.current = Date.now(); setStarted(true);
@@ -236,15 +240,20 @@ export default function ListeningTest() {
   const renderGapGroup = g => (
     <div className="rx-notes">
       {g.items.map(q => {
-        const [a, b] = (q.question_text || '').split('___');
+        const lines = (q.question_text || '').split('\n');
+        const heads = lines.slice(0, -1).filter(Boolean);
+        const [a, b] = lines[lines.length - 1].split('___');
         const field = g.letters ? letterSelect(q, g.letters) : gapInput(q);
         return (
-          <div key={q.id} id={`lq-${q.question_number}`} className="rx-gapline">
+          <div key={q.id} id={`lq-${q.question_number}`}>
+          {heads.map((h, i) => <p key={i} className="rx-subhead">{h}</p>)}
+          <div className="rx-gapline">
             <span className="rx-bullet">•</span>{' '}
             {g.letters && <span className="rx-num" style={{ marginRight: 6 }}>{q.question_number}</span>}
             {t(`l${q.question_number}a`, a || '')}
             {field}
             {b !== undefined && t(`l${q.question_number}b`, b)}
+          </div>
           </div>
         );
       })}
@@ -269,13 +278,13 @@ export default function ListeningTest() {
   const renderList = g => (
     <>
       <div className="rx-box">
-        <b>Options</b>
+        <b>{g.box || 'Options'}</b>
         {g.options.map(o => <div key={o.value} className="rx-boxrow"><b>{o.code}</b><span>{o.text}</span></div>)}
       </div>
       {g.items.map(q => (
         <div key={q.id} id={`lq-${q.question_number}`} className={`rx-sel ${currentQ === q.question_number ? 'rx-q-cur' : ''}`}>
           <span className="rx-num">{q.question_number}</span>
-          <span className="rx-sel-label">{t(`l${q.question_number}`, (q.question_text || '').replace('___', '……'))}</span>
+          <span className="rx-sel-label">{t(`l${q.question_number}`, (q.question_text || '').split('\n').pop().replace('___', '……'))}</span>
           <select value={answers[q.question_number] || ''}
             onFocus={() => setCurrentQ(q.question_number)}
             onChange={e => setAnswer(q.question_number, e.target.value)}>
@@ -291,6 +300,7 @@ export default function ListeningTest() {
 
   return (
     <div className="rx-root" onMouseUp={onMouseUp}>
+      {preview && <PreviewBadge />}
       <style>{EXAM_CSS}</style>
       <audio ref={audioRef} src={parts[Math.min(audioIdx, parts.length - 1)].audio_url} preload="auto"
         onTimeUpdate={e => setAudio(s => ({ ...s, cur: e.target.currentTime }))}
@@ -377,8 +387,8 @@ export default function ListeningTest() {
             );
           })}
         </div>
-        <button className="rx-submit" onClick={() => setConfirmOpen(true)} disabled={submitting}>
-          {submitting ? 'Submitting…' : 'Submit'}
+        <button className="rx-submit" onClick={() => (preview ? window.close() || navigate('/studio') : setConfirmOpen(true))} disabled={submitting}>
+          {preview ? 'Exit preview' : submitting ? 'Submitting…' : 'Submit'}
         </button>
       </footer>
 

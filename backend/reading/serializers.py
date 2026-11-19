@@ -5,7 +5,7 @@ class ReadingQuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReadingQuestion
         fields = ['id', 'question_number', 'question_type',
-                  'question_text', 'options']
+                  'question_text', 'options', 'group_title', 'group_instruction']
         # correct_answer yo'q — xavfsizlik uchun
 
 class ReadingPassageSerializer(serializers.ModelSerializer):

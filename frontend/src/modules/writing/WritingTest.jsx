@@ -4,7 +4,7 @@ import api from '../../services/api';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
 import { useAuth } from '../../context/AuthContext';
-import { EXAM_CSS, ZoomableImage } from '../../components/examKit';
+import { EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
 
 const MIN1 = 150, MIN2 = 250;
 const TASK1_MINS = 20, TASK2_MINS = 40;
@@ -50,6 +50,7 @@ export default function WritingTest() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const preview = isPreview(user);
   const [split, setSplit] = useState(50);
   const dragRef = useRef(false);
   const [test, setTest] = useState(null);
@@ -106,6 +107,7 @@ export default function WritingTest() {
   };
 
   const doSubmit = async () => {
+    if (preview) return;
     setConfirm(null);
     setSubmitting(true);
     try {
@@ -116,6 +118,7 @@ export default function WritingTest() {
   };
 
   const forceSubmit = async (finishReason = 'timeout') => {
+    if (preview) return;
     if (submitting || submitted) return;
     setSubmitting(true);
     try {
@@ -131,7 +134,7 @@ export default function WritingTest() {
   }, [timer.isExpired, started]);
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
-    useAntiCheat({ active: started && !submitted, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id });
+    useAntiCheat({ active: started && !submitted && !preview, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id });
 
   const handleStart = async () => { await enterFullscreen(); startedAtRef.current = Date.now(); setStarted(true); };
 
@@ -149,6 +152,7 @@ export default function WritingTest() {
   if (loading) return <div className="container"><p className="text-muted">Loading...</p></div>;
   if (!test) return <div className="container"><p>Test not found.</p></div>;
   if (blocked) return <BlockedScreen onBack={() => navigate('/writing')} />;
+  if (!started && preview) return <PreviewGate title={test.title} onStart={() => { startedAtRef.current = Date.now(); setStarted(true); }} />;
   if (!started) return <FullscreenGate title={test.title} onStart={handleStart} />;
 
   if (submitted) return (
@@ -174,6 +178,7 @@ export default function WritingTest() {
 
   return (
     <div className="rx-root">
+      {preview && <PreviewBadge />}
       <style>{EXAM_CSS}</style>
       <header className="rx-header">
         <div className="rx-brand">IELTS</div>
@@ -223,8 +228,8 @@ export default function WritingTest() {
             );
           })}
         </div>
-        <button className="rx-submit" onClick={handleSubmit} disabled={submitting}>
-          {submitting ? 'Submitting…' : 'Submit'}
+        <button className="rx-submit" onClick={() => (preview ? window.close() || navigate('/studio') : handleSubmit())} disabled={submitting}>
+          {preview ? 'Exit preview' : submitting ? 'Submitting…' : 'Submit'}
         </button>
       </footer>
 

@@ -9,5 +9,6 @@ urlpatterns = [
     path('api/listening/', include('listening.urls')),
     path('api/reading/', include('reading.urls')),
     path('api/writing/', include('writing.urls')),
+    path('api/studio/', include('studio.urls')),
     # path('api/speaking/', include('speaking.urls')),  ← keyinchalik
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

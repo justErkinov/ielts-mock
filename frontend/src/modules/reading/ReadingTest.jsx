@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import ScoreCard from '../../components/ScoreCard';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
-import { addRange, HL_COLORS, HLText, EXAM_CSS } from '../../components/examKit';
+import { addRange, HL_COLORS, HLText, EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
 
 /* ------------------------------------------------------------------ */
 /* Question grouping (real IELTS layout: "Questions 1–7" + instructions) */
@@ -31,7 +31,60 @@ function cleanText(t) {
     .trim();
 }
 
+// "Heading\nHeading\nquestion text" -> headings shown above the question line
+export function splitHeads(text) {
+  const lines = (text || '').split('\n');
+  return [lines.slice(0, -1).filter(Boolean), lines[lines.length - 1]];
+}
+
+const LEGEND_LINE = /^(TRUE|FALSE|YES|NO|NOT GIVEN)\s+(if|when)\b/i;
+
+// Tests made in the teacher studio carry their own "Questions 1–7" title and instructions
+function buildTeacherGroups(questions, passageNumber) {
+  const groups = [];
+  questions.forEach(q => {
+    const last = groups[groups.length - 1];
+    if (last && last.title === q.group_title) last.items.push(q);
+    else groups.push({ title: q.group_title, instruction: q.group_instruction || '', items: [q] });
+  });
+  return groups.map(g => {
+    const kinds = g.items.map(kindOf);
+    const instr = g.instruction.split('\n').map(l => l.trim()).filter(Boolean);
+    const img = (instr.find(l => /^\[img:/.test(l)) || '').replace(/^\[img:|\]$/g, '');
+    const box = (instr.find(l => /^\[box:/.test(l)) || '').replace(/^\[box:|\]$/g, '');
+    const lines = instr.filter(l => !/^\[(img|box):/.test(l) && !LEGEND_LINE.test(l));
+    const out = { items: g.items, img, range: (g.title || '').replace(/(\d)\s*-\s*(\d)/, '$1–$2'), lines };
+    if (kinds.every(k => k === 'tfng')) out.style = 'tfng';
+    else if (kinds.every(k => k === 'ynng')) out.style = 'ynng';
+    else if (kinds.every(k => k === 'gap')) out.style = 'gap';
+    else if (g.items.length > 1 && kinds.every(k => k === kinds[0])) out.style = 'list';
+    else out.style = 'choice';
+
+    if (out.style === 'tfng') out.legend = [['TRUE', 'if the statement agrees with the information'],
+      ['FALSE', 'if the statement contradicts the information'], ['NOT GIVEN', 'if there is no information on this']];
+    if (out.style === 'ynng') out.legend = [['YES', 'if the statement agrees with the claims of the writer'],
+      ['NO', 'if the statement contradicts the claims of the writer'],
+      ['NOT GIVEN', 'if it is impossible to say what the writer thinks about this']];
+    if (out.style === 'list') {
+      const opts = g.items[0].options || [];
+      const roman = opts.every(o => /^[ivx]+\.\s/i.test(o));
+      out.options = opts.map((o, i) => {
+        const m = o.match(/^([ivx]+)\.\s*(.*)$/i);
+        return m && roman ? { code: m[1], text: m[2], value: o } : { code: LETTERS[i], text: o, value: o };
+      });
+      out.boxTitle = box || (roman ? 'List of Headings' : 'Options');
+      out.labels = g.items.map(q => cleanText(q.question_text).replace(/^Choose the correct heading for\s*/i, ''));
+    }
+    if (!out.lines.length) {   // no instructions were pasted: use the usual wording
+      const fallback = buildGroups(g.items.map(q => ({ ...q, group_title: '' })), passageNumber)[0];
+      out.lines = fallback ? fallback.lines : [];
+    }
+    return out;
+  });
+}
+
 function buildGroups(questions, passageNumber) {
+  if (questions.some(q => q.group_title)) return buildTeacherGroups(questions, passageNumber);
   const raw = [];
   questions.forEach(q => {
     const k = kindOf(q);
@@ -112,6 +165,7 @@ export default function ReadingTest() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const preview = isPreview(user);
 
   const [test, setTest] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +205,7 @@ export default function ReadingTest() {
 
   /* ---------- submit ---------- */
   const submit = useCallback(async (finishReason = 'manual') => {
+    if (preview) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
@@ -170,7 +225,7 @@ export default function ReadingTest() {
   }, [id]);
 
   const { warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } = useAntiCheat({
-    active: started && !result, onBlocked: () => submit('blocked'), testType: 'reading', testId: id,
+    active: started && !result && !preview, onBlocked: () => submit('blocked'), testType: 'reading', testId: id,
   });
 
   useEffect(() => { if (result || blocked) exitFullscreen(); }, [result, blocked, exitFullscreen]);
@@ -257,6 +312,7 @@ export default function ReadingTest() {
         onBack={() => navigate('/reading')} />
     </div>
   );
+  if (!started && preview) return <PreviewGate title={test.title} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
   if (!started) return (
     <FullscreenGate title={test.title} onStart={async () => {
       await enterFullscreen(); startedAt.current = Date.now(); setStarted(true);
@@ -275,7 +331,8 @@ export default function ReadingTest() {
   const numBadge = n => <span className="rx-num">{n}</span>;
 
   const renderGap = q => {
-    const parts = cleanText(q.question_text).split('___');
+    const [heads, body] = splitHeads(q.question_text);
+    const parts = cleanText(body).split('___');
     const input = (
       <input
         className={`rx-gap ${currentQ === q.question_number ? 'rx-gap-cur' : ''}`}
@@ -287,13 +344,16 @@ export default function ReadingTest() {
       />
     );
     return (
-      <div key={q.id} id={`rq-${q.question_number}`} className="rx-gapline">
+      <div key={q.id} id={`rq-${q.question_number}`}>
+        {heads.map((h, i) => <p key={i} className="rx-subhead">{h}</p>)}
+      <div className="rx-gapline">
         <span className="rx-bullet">•</span>{' '}
         <HLText id={`q${q.question_number}a`} text={parts[0]} ranges={hl[`q${q.question_number}a`]} onRemove={removeHighlight} />
         {input}
         {parts[1] !== undefined && (
           <HLText id={`q${q.question_number}b`} text={parts[1]} ranges={hl[`q${q.question_number}b`]} onRemove={removeHighlight} />
         )}
+      </div>
       </div>
     );
   };
@@ -320,6 +380,7 @@ export default function ReadingTest() {
 
   return (
     <div className="rx-root" onMouseUp={onMouseUp}>
+      {preview && <PreviewBadge />}
       <style>{EXAM_CSS}</style>
 
       {/* Header */}
@@ -367,6 +428,7 @@ export default function ReadingTest() {
             <div key={gi} className="rx-group">
               <h3>{g.range}</h3>
               {g.lines.map(l => <p key={l} className="rx-instr">{l}</p>)}
+              {g.img && <ZoomableImage src={g.img} alt={g.range} height={340} />}
               {g.legend && (
                 <table className="rx-legend"><tbody>
                   {g.legend.map(([a, b]) => <tr key={a}><td><b>{a}</b></td><td>{b}</td></tr>)}
@@ -440,8 +502,8 @@ export default function ReadingTest() {
             );
           })}
         </div>
-        <button className="rx-submit" onClick={() => setConfirmOpen(true)} disabled={submitting}>
-          {submitting ? 'Submitting…' : 'Submit'}
+        <button className="rx-submit" onClick={() => (preview ? window.close() || navigate('/studio') : setConfirmOpen(true))} disabled={submitting}>
+          {preview ? 'Exit preview' : submitting ? 'Submitting…' : 'Submit'}
         </button>
       </footer>
 

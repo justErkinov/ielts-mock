@@ -10,7 +10,13 @@ class ListeningTestListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        tests = ListeningTest.objects.filter(is_active=True).order_by('title')
+        tests = ListeningTest.objects.filter(is_active=True)
+        u = request.user
+        # Teachers can open their own drafts from the studio ("Preview")
+        if request.GET.get('preview') and (u.is_superuser or getattr(u, 'is_teacher', False)):
+            drafts = ListeningTest.objects.filter(is_active=False)
+            tests = tests | (drafts if u.is_superuser else drafts.filter(created_by=u))
+        tests = tests.order_by('title')
         return Response(ListeningTestSerializer(tests, many=True).data)
 
 

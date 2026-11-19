@@ -20,6 +20,7 @@ export default function Navbar() {
     { path: '/listening', label: 'Listening' },
     { path: '/reading', label: 'Reading' },
     { path: '/writing', label: 'Writing' },
+    ...(user && (user.is_teacher || user.is_superuser) ? [{ path: '/studio', label: 'Studio' }] : []),
   ];
 
   // No menu on exam pages: students must not navigate away mid-test

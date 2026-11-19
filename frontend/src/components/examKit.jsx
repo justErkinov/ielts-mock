@@ -262,6 +262,8 @@ export const EXAM_CSS = `
 .rx-legend{margin:6px 0 14px;font-size:13.5px;border-collapse:collapse}
 .rx-legend td{padding:2px 14px 2px 0;vertical-align:top}
 .rx-notes{border:1px solid #d1d5db;border-radius:6px;padding:14px 16px;margin-top:10px}
+.rx-subhead { font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
+.rx-notes > div:first-child > .rx-subhead:first-child { margin-top: 0; }
 .rx-gapline{line-height:2.4;font-size:14.5px;scroll-margin:90px}
 .rx-bullet{color:#6b7280}
 .rx-gap{width:150px;height:30px;margin:0 6px;border:1px solid #9ca3af;border-radius:4px;padding:0 8px;font-size:14.5px;
@@ -355,3 +357,37 @@ export const EXAM_CSS = `
 .wx-prompt{border:1px solid #d1d5db;border-radius:6px;padding:16px 18px;font-size:15px;line-height:1.65;white-space:pre-wrap}
 .wx-timer-paused{opacity:.45}
 `;
+
+/* ------------------------------------------------------------------ */
+/* Teacher preview (?preview=1): no fullscreen, no anti-cheat, nothing is saved */
+/* ------------------------------------------------------------------ */
+
+export function isPreview(user) {
+  return new URLSearchParams(window.location.search).has('preview')
+    && !!(user && (user.is_teacher || user.is_superuser));
+}
+
+export function PreviewGate({ title, onStart }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', fontFamily: 'Arial, sans-serif', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: 12, padding: 30, maxWidth: 460, boxShadow: '0 20px 50px rgba(0,0,0,.15)' }}>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Preview: {title}</h2>
+        <p style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.6, marginBottom: 20 }}>
+          You see the test exactly as students do. Fullscreen and the exam rules are off,
+          and nothing you answer is saved or sent to Telegram.
+        </p>
+        <button onClick={onStart} style={{ width: '100%', background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+          Open preview
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function PreviewBadge() {
+  return (
+    <div style={{ position: 'fixed', bottom: 64, left: 16, zIndex: 2500, background: '#f59e0b', color: '#111', fontWeight: 700, fontSize: 12.5, padding: '5px 14px', borderRadius: 999, fontFamily: 'Arial, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,.15)' }}>
+      Preview — answers are not saved
+    </div>
+  );
+}
