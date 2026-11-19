@@ -195,8 +195,8 @@ def notify_writing(user, attempt, time_info=None):
         tt1 = _int(time_info.get('task1_time'))
         tt2 = _int(time_info.get('task2_time'))
         if tt1 is not None or tt2 is not None:
-            task_times = (f"\n🕐 Task 1 time: {_fmt_duration(tt1)} (of 20 min)"
-                          f"\n🕐 Task 2 time: {_fmt_duration(tt2)} (of 40 min)")
+            task_times = (f"\n🕐 Task 1 time: {_fmt_duration(tt1)} (recommended 20 min)"
+                          f"\n🕐 Task 2 time: {_fmt_duration(tt2)} (recommended 40 min)")
 
     _send(
         f"✍️ *WRITING SUBMISSION*\n\n"

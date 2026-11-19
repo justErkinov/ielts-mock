@@ -10,28 +10,26 @@ const MIN1 = 150, MIN2 = 250;
 const TASK1_MINS = 20, TASK2_MINS = 40;
 const wc = t => t.trim().split(/\s+/).filter(Boolean).length;
 
-// Alohida vaqt boshqaruvchi hook
-function useTaskTimer(minutes, active) {
+const TOTAL_MINS = TASK1_MINS + TASK2_MINS; // one shared 60-minute clock, like the real exam
+
+// One countdown for the whole Writing test. It is based on a fixed end time,
+// so switching between Task 1 and Task 2 never pauses it.
+function useExamTimer(minutes, running) {
   const [secs, setSecs] = useState(minutes * 60);
-  const savedSecs = useRef(minutes * 60);
+  const endRef = useRef(null);
 
   useEffect(() => {
-    if (!active) {
-      savedSecs.current = secs;
-      return;
-    }
-    const iv = setInterval(() => {
-      setSecs(p => {
-        if (p <= 1) { clearInterval(iv); return 0; }
-        return p - 1;
-      });
-    }, 1000);
+    if (!running) return;
+    if (!endRef.current) endRef.current = Date.now() + minutes * 60 * 1000;
+    const tick = () => setSecs(Math.max(0, Math.ceil((endRef.current - Date.now()) / 1000)));
+    tick();
+    const iv = setInterval(tick, 500);
     return () => clearInterval(iv);
-  }, [active]);
+  }, [running, minutes]);
 
-  // Ovozli ogohlantirish — 5 daqiqa qolganda
+  // Short beep when 5 minutes are left
   useEffect(() => {
-    if (secs === 300 && active) {
+    if (secs === 300 && running) {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const osc = ctx.createOscillator();
@@ -41,14 +39,11 @@ function useTaskTimer(minutes, active) {
         setTimeout(() => osc.stop(), 600);
       } catch (e) {}
     }
-  }, [secs, active]);
+  }, [secs, running]);
 
   const m = Math.floor(secs / 60).toString().padStart(2, '0');
   const s = (secs % 60).toString().padStart(2, '0');
-  const low = secs < 240; // 4 daqiqa
-  const warning5 = secs < 300; // 5 daqiqa
-
-  return { secs, display: `${m}:${s}`, low, warning5, isExpired: secs === 0 };
+  return { secs, display: `${m}:${s}`, low: secs < 300, isExpired: secs === 0 };
 }
 
 export default function WritingTest() {
@@ -73,15 +68,26 @@ export default function WritingTest() {
     api.get(`/writing/${id}/`).then(r => setTest(r.data)).finally(() => setLoading(false));
   }, [id]);
 
-  // Har task uchun alohida timer — faqat aktiv task vaqti ketadi
-  const t1Timer = useTaskTimer(TASK1_MINS, started && activeTask === 1 && !submitted);
-  const t2Timer = useTaskTimer(TASK2_MINS, started && activeTask === 2 && !submitted);
+  const timer = useExamTimer(TOTAL_MINS, started && !submitted);
 
-  const timeInfo = (finishReason) => ({
+  // How long the student spent on each task (for the teacher's report only)
+  const spentRef = useRef({ 1: 0, 2: 0 });
+  const segRef = useRef({ task: 1, at: null });
+  const closeSegment = () => {
+    const seg = segRef.current;
+    if (seg.at) { spentRef.current[seg.task] += Date.now() - seg.at; seg.at = Date.now(); }
+  };
+  useEffect(() => {
+    if (!started) return;
+    closeSegment();
+    segRef.current = { task: activeTask, at: Date.now() };
+  }, [activeTask, started]);
+
+  const timeInfo = (finishReason) => (closeSegment(), {
     time_spent: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : null,
-    time_limit: (TASK1_MINS + TASK2_MINS) * 60,
-    task1_time: TASK1_MINS * 60 - t1Timer.secs,
-    task2_time: TASK2_MINS * 60 - t2Timer.secs,
+    time_limit: TOTAL_MINS * 60,
+    task1_time: Math.round(spentRef.current[1] / 1000),
+    task2_time: Math.round(spentRef.current[2] / 1000),
     finish_reason: finishReason,
   });
 
@@ -119,15 +125,10 @@ export default function WritingTest() {
     finally { setSubmitting(false); }
   };
 
-  // Timer tugaganda avtomatik keyingi taskga o'tish yoki submit
+  // 60 minutes are over -> both tasks are submitted automatically
   useEffect(() => {
-    if (started && activeTask === 1 && t1Timer.isExpired) {
-      setActiveTask(2);
-    }
-    if (started && activeTask === 2 && t2Timer.isExpired) {
-      forceSubmit('timeout');
-    }
-  }, [t1Timer.isExpired, t2Timer.isExpired, started]);
+    if (started && timer.isExpired) forceSubmit('timeout');
+  }, [timer.isExpired, started]);
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
     useAntiCheat({ active: started && !submitted, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id });
@@ -171,13 +172,6 @@ export default function WritingTest() {
   const words = isT1 ? w1 : w2;
   const min = isT1 ? MIN1 : MIN2;
 
-  const timerBox = (n, tm) => (
-    <div className={`rx-timer ${activeTask === n && tm.low ? 'rx-timer-low' : ''} ${activeTask !== n ? 'wx-timer-paused' : ''}`}
-      title={activeTask === n ? 'Running' : 'Paused'}>
-      Task {n} · {tm.display}{activeTask !== n && tm.secs > 0 ? ' · paused' : ''}
-    </div>
-  );
-
   return (
     <div className="rx-root">
       <style>{EXAM_CSS}</style>
@@ -185,7 +179,7 @@ export default function WritingTest() {
         <div className="rx-brand">IELTS</div>
         <div className="rx-taker">Test taker: <b>{user?.first_name || user?.username}</b></div>
         <div className="rx-title">{test.title}</div>
-        <div style={{ display: 'flex', gap: 8 }}>{timerBox(1, t1Timer)}{timerBox(2, t2Timer)}</div>
+        <div className={`rx-timer ${timer.low ? 'rx-timer-low' : ''}`}>{timer.display} left</div>
       </header>
 
       <main className="rx-main">
