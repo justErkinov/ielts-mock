@@ -52,14 +52,14 @@ YNNG = ['YES', 'NO', 'NOT GIVEN']
 BLANK = r'(?:\.{3,}|…+|_{2,}|‥+)'
 GROUP_RE = re.compile(
     r'^\s*questions?\s+(\d{1,2})(?:\s*(?:[-–—]|to|and|&)\s*(\d{1,2}))?\s*[:.]?\s*$', re.I)
-Q_RE = re.compile(r'^\s*[•●▪·\-]?\s*(\d{1,2})\s*[.):]?\s+(.*)$')
-Q_ONLY_RE = re.compile(r'^\s*(\d{1,2})\s*[.):]?\s*$')
+Q_RE = re.compile(r'^\s*[•●▪·◦○■\-]?\s*\(?(\d{1,2})\s*[.):]?\s+(.*)$')
+Q_ONLY_RE = re.compile(r'^\s*\(?(\d{1,2})\s*[.):]?\s*$')
 LETTER_OPT_RE = re.compile(r'^\s*\(?([A-Z])\s*[.)]?\s+(.+)$')
 ROMAN_OPT_RE = re.compile(r'^\s*\(?(xiii|xiv|xii|xv|xi|x|viii|vii|vi|v|iv|ix|iii|ii|i)\s*[.)]?\s+(.+)$', re.I)
-EMBEDDED_RE = re.compile(r'(?<![\d£$€.,])\b(\d{1,2})\s*' + BLANK)
+EMBEDDED_RE = re.compile(r'(?<![\d£$€.,])\(?\b(\d{1,2})\)?\s*' + BLANK)
 IMG_RE = re.compile(r'^\s*\[img:[^\]]+\]\s*$')
 BOX_TOKEN_RE = re.compile(r'\[box:([^\]]*)\]')
-BULLET_RE = re.compile(r'^\s*[•●▪·\-–]\s*')
+BULLET_RE = re.compile(r'^\s*[•●▪·◦○■\-–]\s*')
 
 
 def _clean_line(s):
@@ -127,12 +127,37 @@ def _embedded(line, expected):
     return out
 
 
+BLANK_START_RE = re.compile(r'^\s*' + BLANK)
+ENDS_WITH_NUM_RE = re.compile(r'(?:^|\s)\(?\d{1,2}\)?\s*$')
+
+
+def _join_broken(lines):
+    """PDF copies often split '1 ……… and cook' over two lines:
+    a line that starts with a gap is glued to the line before it when that line
+    ends with the question number (or is only the number)."""
+    out = []
+    for l in lines:
+        if out and BLANK_START_RE.match(l) and ENDS_WITH_NUM_RE.search(out[-1]):
+            out[-1] = out[-1].rstrip() + ' ' + l.strip()
+        else:
+            out.append(l)
+    # '• also offers' + '2 …… classes' -> one line, when the first is an unfinished bullet
+    joined = []
+    for l in out:
+        if joined and BULLET_RE.match(joined[-1]) and not re.search(BLANK, joined[-1]) \
+                and re.match(r'^\s*\(?\d{1,2}\)?\s*' + BLANK, l) and not joined[-1].rstrip().endswith(('.', ':', '?')):
+            joined[-1] = joined[-1].rstrip() + ' ' + l.strip()
+        else:
+            joined.append(l)
+    return joined
+
+
 NOISE_RE = re.compile(r'^(part|section|listening|reading|reading passage|passage)\s*\d*\s*$', re.I)
 
 
 def parse_questions(text):
     lines = [_clean_line(l) for l in (text or '').splitlines()]
-    lines = [l for l in lines if l.strip() and not NOISE_RE.match(l.strip())]
+    lines = _join_broken([l for l in lines if l.strip() and not NOISE_RE.match(l.strip())])
     groups, errors, used = [], [], set()
     g = None
     i = 0
@@ -176,6 +201,9 @@ def parse_questions(text):
         # "1 text" / "1. text" / "1"
         qm = Q_RE.match(line) or Q_ONLY_RE.match(line)
         n = int(qm.group(1)) if qm else None
+        multi = _embedded(line, expected) if qm else []
+        if qm and len([x for x in multi if x[0] not in used]) >= 2 and multi[0][0] == n:
+            qm = None   # several numbered gaps on one line: handled below
         if qm and ((expected is None and n not in used) or (expected is not None and n in expected)):
             rest = ((qm.group(2) if qm.re is Q_RE else '') or '').strip()
             gap = bool(re.search(BLANK + '|___', rest))
@@ -209,7 +237,10 @@ def parse_questions(text):
             g['instr'].append(stripped)
         elif q and not q['gap'] and q['options'] is None and not g['shared'] and not g['pending'] \
                 and not (i + 1 < len(lines) and _option_run(lines, i + 1)[0]):
-            q['text'] = (q['text'] + ' ' + stripped).strip()      # stem wrapped onto the next line
+            if re.search(BLANK, stripped):
+                q['text'], q['gap'] = _blanks(q['text'] + ' ' + stripped), True
+            else:
+                q['text'] = (q['text'] + ' ' + stripped).strip()      # stem wrapped onto the next line
         elif q and q['gap'] and not g['pending'] and stripped[:1].islower():
             q['text'] = (q['text'] + ' ' + _blanks(stripped)).strip()  # notes line wrapped
         else:
@@ -229,6 +260,10 @@ def parse_questions(text):
             warnings.append(f"{g['title'] or 'Group'}: this text after the last question was not used: "
                             f"\"{g['pending'][0][:60]}\"")
         _split_instruction(g)
+    for g in groups:
+        if g['title'] and not g['questions']:
+            errors.append(f"{g['title']}: no questions were found under this title. Put the number before each "
+                          f"question (\"1 …\") or before each gap (\"1 ……\").")
     return [g for g in groups if g['questions']], errors, warnings
 
 
@@ -269,7 +304,7 @@ def _letters_from_instr(instr):
 
 # ---------------------------------------------------------------- answers
 
-HEAD_RE = re.compile(r'^\s*(\d{1,2})(?:\s*(?:[-–&,]|and)\s*(\d{1,2}))?\s*[.):]?\s+', re.I)
+HEAD_RE = re.compile(r'^\s*(?:Q(?:uestion)?\s*)?(\d{1,2})(?:\s*(?:[-–&,]|and)\s*(\d{1,2}))?\s*[.):]?\s+', re.I)
 
 
 def parse_answers(text):

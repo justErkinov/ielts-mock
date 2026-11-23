@@ -14,8 +14,10 @@ from rest_framework.views import APIView
 from listening.models import ListeningTest, ListeningQuestion
 from reading.models import ReadingTest, ReadingPassage, ReadingQuestion
 from writing.models import WritingTest
-from .models import MediaFile
-from .storage import save_upload, cloudinary_ready
+from django.http import StreamingHttpResponse
+from .models import MediaFile, MediaChunk
+from . import storage
+from .storage import save_upload, cloudinary_ready, CHUNK_SIZE
 from .textformat import parse, to_text
 from django.conf import settings
 
@@ -119,6 +121,7 @@ class ParseView(APIView):
 
 
 class UploadView(APIView):
+    """Small files in one request (kept for compatibility)."""
     permission_classes = [IsTeacher]
 
     def post(self, request):
@@ -134,35 +137,103 @@ class UploadView(APIView):
         return Response({'url': url, 'storage': where, 'name': f.name, 'size': f.size})
 
 
+class UploadStartView(APIView):
+    """Chunked upload, step 1: {name, type, size} -> {id, chunk_size}"""
+    permission_classes = [IsTeacher]
+
+    def post(self, request):
+        d = request.data
+        try:
+            m = storage.start(d.get('name', ''), d.get('type', ''), int(d.get('size') or 0), request.user)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+        return Response({'id': str(m.id), 'chunk_size': CHUNK_SIZE})
+
+
+def _my_upload(request, pk):
+    try:
+        return MediaFile.objects.get(pk=pk, uploaded_by=request.user)
+    except (MediaFile.DoesNotExist, ValueError):
+        raise Http404
+
+
+class UploadChunkView(APIView):
+    """Step 2 (repeat): multipart {index, file}"""
+    permission_classes = [IsTeacher]
+
+    def post(self, request, pk):
+        m = _my_upload(request, pk)
+        f = request.FILES.get('file')
+        try:
+            index = int(request.data.get('index'))
+            if f is None:
+                raise ValueError('No file piece received.')
+            storage.put_chunk(m, index, f.read())
+        except (TypeError, ValueError) as e:
+            return Response({'error': str(e) or 'Bad file piece.'}, status=400)
+        return Response({'ok': True})
+
+
+class UploadFinishView(APIView):
+    """Step 3: -> {url}"""
+    permission_classes = [IsTeacher]
+
+    def post(self, request, pk):
+        m = _my_upload(request, pk)
+        try:
+            url, where = storage.finish(m, request)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+        except Exception:
+            return Response({'error': 'Saving the file failed. Please try again.'}, status=502)
+        return Response({'url': url, 'storage': where, 'name': m.name, 'size': m.size})
+
+
 class MediaView(APIView):
-    """Serves files kept in the database. Supports Range requests so audio streams normally."""
+    """Serves files kept in the database, piece by piece. Supports Range requests,
+    so audio starts at once and the browser can resume."""
     permission_classes = [AllowAny]
     authentication_classes = []
 
     def get(self, request, pk, name=None):
         try:
-            m = MediaFile.objects.only('content_type', 'size', 'data').get(pk=pk)
+            m = MediaFile.objects.only('content_type', 'size', 'complete').get(pk=pk)
         except (MediaFile.DoesNotExist, ValueError):
             raise Http404
-        data = bytes(m.data)
-        size = len(data)
-        rng = request.META.get('HTTP_RANGE', '')
-        mm = re.match(r'bytes=(\d*)-(\d*)', rng)
+        if not m.complete:
+            raise Http404
+        size = m.size
+        start, end, status = 0, size - 1, 200
+        mm = re.match(r'bytes=(\d*)-(\d*)', request.META.get('HTTP_RANGE', ''))
         if mm and (mm.group(1) or mm.group(2)):
             if mm.group(1):
                 start = int(mm.group(1))
-                end = int(mm.group(2)) if mm.group(2) else size - 1
+                end = min(int(mm.group(2)) if mm.group(2) else size - 1, size - 1)
             else:
-                start, end = max(0, size - int(mm.group(2))), size - 1
-            end = min(end, size - 1)
+                start = max(0, size - int(mm.group(2)))
             if start > end:
                 resp = HttpResponse(status=416)
                 resp['Content-Range'] = f'bytes */{size}'
                 return resp
-            resp = HttpResponse(data[start:end + 1], status=206, content_type=m.content_type)
+            status = 206
+
+        has_chunks = MediaChunk.objects.filter(file_id=m.pk).exists()
+
+        def body():
+            if not has_chunks:   # older single-piece upload
+                yield bytes(MediaFile.objects.values_list('data', flat=True).get(pk=m.pk))[start:end + 1]
+                return
+            first, last = start // CHUNK_SIZE, end // CHUNK_SIZE
+            for idx in range(first, last + 1):
+                data = bytes(MediaChunk.objects.values_list('data', flat=True).get(file_id=m.pk, index=idx))
+                lo = start - idx * CHUNK_SIZE if idx == first else 0
+                hi = end - idx * CHUNK_SIZE + 1 if idx == last else len(data)
+                yield data[lo:hi]
+
+        resp = StreamingHttpResponse(body(), status=status, content_type=m.content_type)
+        resp['Content-Length'] = str(end - start + 1)
+        if status == 206:
             resp['Content-Range'] = f'bytes {start}-{end}/{size}'
-        else:
-            resp = HttpResponse(data, content_type=m.content_type)
         resp['Accept-Ranges'] = 'bytes'
         resp['Cache-Control'] = 'public, max-age=31536000, immutable'
         resp['Access-Control-Allow-Origin'] = '*'

@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import ReadingTest, ReadingAttempt
 from .serializers import ReadingTestSerializer
-from grading import check, display
+from grading import check, display, PairGuard
 
 
 class ReadingTestListView(APIView):
@@ -38,13 +38,14 @@ class ReadingSubmitView(APIView):
         score = 0
         total = 0
         result_detail = {}
+        guard = PairGuard()
 
         for passage in test.passages.all():
             for q in passage.questions.all():
                 total += 1
                 num = str(q.question_number)
                 given = user_answers.get(num, '')
-                ok = check(given, q.correct_answer)
+                ok = guard.check(given, q.correct_answer, q.question_type)
                 score += ok
                 result_detail[num] = {
                     'your_answer': given,

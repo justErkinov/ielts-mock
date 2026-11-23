@@ -11,6 +11,41 @@ export const errText = (e, fallback = 'Something went wrong. Check the internet 
   e?.response?.data?.error || e?.response?.data?.detail || fallback;
 
 /* ---------- upload button (audio or image) ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function withRetry(fn, tries = 4) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      const st = e?.response?.status;
+      if (i >= tries || (st && st < 500 && st !== 408 && st !== 429)) throw e;   // real errors: stop
+      await sleep(1500 * i);                                                  // network hiccup: retry
+    }
+  }
+}
+
+// Sends the file in pieces so a slow or shaky connection never loses the whole upload
+export async function uploadFile(file, onProgress) {
+  const { data: s } = await withRetry(() => api.post('/studio/upload/start/', {
+    name: file.name, type: file.type, size: file.size,
+  }));
+  const n = Math.ceil(file.size / s.chunk_size);
+  for (let i = 0; i < n; i++) {
+    const piece = file.slice(i * s.chunk_size, (i + 1) * s.chunk_size);
+    await withRetry(() => {
+      const fd = new FormData();
+      fd.append('index', String(i));
+      fd.append('file', piece, file.name);
+      return api.post(`/studio/upload/${s.id}/chunk/`, fd, {
+        timeout: 120000,
+        onUploadProgress: p => onProgress?.(Math.min(99, Math.round(((i + (p.total ? p.loaded / p.total : 0)) / n) * 100))),
+      });
+    });
+    onProgress?.(Math.min(99, Math.round(((i + 1) / n) * 100)));
+  }
+  const { data } = await withRetry(() => api.post(`/studio/upload/${s.id}/finish/`, {}, { timeout: 300000 }));
+  return data.url;
+}
+
 export function UploadButton({ accept, label, onDone, small }) {
   const ref = useRef(null);
   const [pct, setPct] = useState(null);
@@ -21,15 +56,11 @@ export function UploadButton({ accept, label, onDone, small }) {
     e.target.value = '';
     if (!f) return;
     setError(''); setPct(0);
-    const fd = new FormData();
-    fd.append('file', f);
     try {
-      const r = await api.post('/studio/upload/', fd, {
-        onUploadProgress: p => p.total && setPct(Math.round((p.loaded / p.total) * 100)),
-      });
-      onDone(r.data.url, f.name);
+      const url = await uploadFile(f, setPct);
+      onDone(url, f.name);
     } catch (err) {
-      setError(errText(err, 'Upload failed. Check the internet connection and try again.'));
+      setError(errText(err, 'Upload failed. Check the internet connection and press the button again.'));
     } finally { setPct(null); }
   };
 

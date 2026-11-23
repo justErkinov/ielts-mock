@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import ListeningTest, ListeningAttempt
 from .serializers import ListeningTestSerializer
-from grading import check, display
+from grading import check, display, PairGuard
 
 
 class ListeningTestListView(APIView):
@@ -44,11 +44,12 @@ class ListeningSubmitView(APIView):
         questions = test.questions.all()
         score = 0
         result_detail = {}
+        guard = PairGuard()
 
         for q in questions:
             num = str(q.question_number)
             given = user_answers.get(num, '')
-            ok = check(given, q.correct_answer)
+            ok = guard.check(given, q.correct_answer, q.question_type)
             score += ok
             result_detail[num] = {
                 'your_answer': given,
@@ -86,11 +87,12 @@ class ListeningGroupSubmitView(APIView):
         for test in sorted(tests, key=lambda t: t.title):
             answers = parts.get(str(test.pk)) or {}
             part_score = 0
+            guard = PairGuard()
             questions = list(test.questions.all())
             for q in questions:
                 num = str(q.question_number)
                 given = answers.get(num, '')
-                ok = check(given, q.correct_answer)
+                ok = guard.check(given, q.correct_answer, q.question_type)
                 part_score += ok
                 detail[num] = {'your_answer': given, 'correct_answer': display(q.correct_answer), 'is_correct': ok}
             ListeningAttempt.objects.create(user=request.user, test=test, answers=answers, score=part_score)

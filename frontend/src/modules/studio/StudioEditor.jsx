@@ -13,6 +13,25 @@ const emptySection = kind => (kind === 'listening'
 const TASK1_HINT = 'The chart below shows …\n\nSummarise the information by selecting and reporting the main features, and make comparisons where relevant.\n\nWrite at least 150 words.';
 const TASK2_HINT = 'Some people believe that …\n\nTo what extent do you agree or disagree?\n\nGive reasons for your answer and include any relevant examples from your own knowledge or experience.\n\nWrite at least 250 words.';
 
+/* Plays the uploaded audio and shows its length, or a clear message if it can't be played */
+function AudioCheck({ src }) {
+  const [state, setState] = useState({ ok: null, dur: 0 });
+  useEffect(() => { setState({ ok: null, dur: 0 }); }, [src]);
+  const fmt = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  return (
+    <div style={{ flex: 1, minWidth: 220 }}>
+      <audio controls preload="metadata" src={src} style={{ width: '100%', height: 36 }}
+        onLoadedMetadata={e => setState({ ok: true, dur: e.target.duration || 0 })}
+        onError={() => setState({ ok: false, dur: 0 })} />
+      <div style={{ fontSize: 12, marginTop: 4 }}>
+        {state.ok === null && <span className="st-muted">Checking the audio…</span>}
+        {state.ok && <span style={{ color: 'var(--green)' }}>✓ Audio works · length {fmt(state.dur)}</span>}
+        {state.ok === false && <span style={{ color: 'var(--accent)' }}>This audio can't be played. Upload an mp3 file instead.</span>}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* One Listening part or Reading passage                               */
 /* ------------------------------------------------------------------ */
@@ -44,7 +63,7 @@ function SectionEditor({ kind, index, value, onChange, onStatus, visible }) {
             <label>Audio for Part {index + 1} <span>mp3 or m4a, plays once in the test</span></label>
             <div className="st-audio">
               {value.audio_url
-                ? <audio controls preload="none" src={value.audio_url} />
+                ? <AudioCheck src={value.audio_url} />
                 : <span className="st-muted" style={{ flex: 1 }}>No audio yet.</span>}
               <UploadButton accept="audio/*" label={value.audio_url ? 'Replace audio' : 'Upload audio'}
                 onDone={url => set('audio_url', url)} />
@@ -119,6 +138,8 @@ export default function StudioEditor() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [problem, setProblem] = useState(null);
+  const [restore, setRestore] = useState(null);
+  const draftKey = `studio-draft:${kind}:${id}`;
 
   useEffect(() => {
     if (isNew || !meta) return;
@@ -135,6 +156,32 @@ export default function StudioEditor() {
     }).catch(e => setLoadError(e?.response?.status === 404 ? 'This test was not found, or it belongs to another teacher.' : errText(e)))
       .finally(() => setLoading(false));
   }, [kind, id, isNew, meta]);
+
+  // Unsaved work kept in this browser: offer to bring it back
+  useEffect(() => {
+    if (loading) return;
+    try {
+      const d = JSON.parse(localStorage.getItem(draftKey) || 'null');
+      if (d && d.at) setRestore(d);
+    } catch { /* storage unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, draftKey]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const t = setTimeout(() => {
+      try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), title, sections, writing })); } catch { /* full or blocked */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [dirty, title, sections, writing, draftKey]);
+
+  const forgetDraft = keys => keys.forEach(k => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
+  const doRestore = () => {
+    setTitle(restore.title || '');
+    if (kind === 'writing') setWriting(restore.writing || writing);
+    else if (restore.sections?.length) setSections(restore.sections);
+    setRestore(null); setDirty(true);
+  };
 
   // warn before closing the tab with unsaved work
   useEffect(() => {
@@ -164,6 +211,7 @@ export default function StudioEditor() {
         : await api.put(`/studio/${kind}/${id}/`, payload(active));
       setIsActive(active);
       setDirty(false);
+      forgetDraft([draftKey, `studio-draft:${kind}:new`, `studio-draft:${kind}:${data.id}`]);
       setNotice(active ? 'Published — students can see this test now.' : 'Saved as a draft. Students cannot see it yet.');
       if (data.warnings?.length && !active) setNotice(`Saved as a draft with ${data.warnings.length} problem(s) to fix before publishing.`);
       if (isNew) navigate(`/studio/${kind}/${data.id}`, { replace: true });
@@ -208,6 +256,14 @@ export default function StudioEditor() {
           onChange={e => change(() => setTitle(e.target.value))} />
         <span className={`st-pill ${isActive ? 'st-pill-live' : 'st-pill-draft'}`}>{isActive ? 'Published' : 'Draft'}</span>
       </div>
+
+      {restore && (
+        <div className="st-prob-warn" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <span style={{ flex: 1 }}>You have unsaved work from {new Date(restore.at).toLocaleString()} in this browser.</span>
+          <button className="btn btn-primary btn-sm" onClick={doRestore}>Restore it</button>
+          <button className="btn btn-outline btn-sm" onClick={() => { forgetDraft([draftKey]); setRestore(null); }}>Discard</button>
+        </div>
+      )}
 
       {kind !== 'writing' && (
         <>
@@ -274,7 +330,7 @@ export default function StudioEditor() {
           <div className="st-bar-status">
             {notice ? <span className="st-good">{notice}</span> : (
               <>
-                {kind !== 'writing' && <><b>{totalQ}</b> questions · </>}
+                {kind !== 'writing' && <><b>{totalQ}</b>{totalQ !== 40 ? ' of 40' : ''} questions · </>}
                 {problems ? <span className="st-bad">{problems} problem{problems > 1 ? 's' : ''} to fix</span>
                   : <span className="st-good">Ready to publish</span>}
                 {dirty && ' · unsaved changes'}
