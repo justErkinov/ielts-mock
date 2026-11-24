@@ -25,7 +25,7 @@ export default function ReadingList() {
                   <div style={{ width: 40, height: 40, borderRadius: 9, background: 'var(--green-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📖</div>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{t.title}</div>
-                    <div className="text-muted">{t.passages?.length || 0} passages · 60 min</div>
+                    <div className="text-muted">{t.passages_count ?? t.passages?.length ?? 0} passages · 60 min</div>
                   </div>
                 </div>
                 <Link to={`/reading/${t.id}`} className="btn btn-primary btn-sm">Start Test →</Link>

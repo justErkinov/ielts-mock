@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import api from '../services/api';
 
 /* ------------------------------------------------------------------ */
 /* Highlights                                                          */
@@ -388,6 +389,59 @@ export function PreviewBadge() {
   return (
     <div style={{ position: 'fixed', bottom: 64, left: 16, zIndex: 2500, background: '#f59e0b', color: '#111', fontWeight: 700, fontSize: 12.5, padding: '5px 14px', borderRadius: 999, fontFamily: 'Arial, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,.15)' }}>
       Preview — answers are not saved
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Safety net: answers are never lost                                  */
+/* ------------------------------------------------------------------ */
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+// Sends the answers; on a network drop or server hiccup it tries again for ~3 minutes.
+// The server ignores a repeated identical submission, so retrying is always safe.
+export async function postWithRetry(url, body, onTry) {
+  const delays = [0, 2000, 4000, 8000, 15000, 30000, 45000, 60000];
+  let last;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i]) await wait(delays[i]);
+    onTry?.(i + 1);
+    try {
+      return await api.post(url, body, { timeout: 30000 });
+    } catch (e) {
+      last = e;
+      const st = e?.response?.status;
+      if (st && st >= 400 && st < 500 && st !== 408 && st !== 429) throw e;   // a real refusal: stop
+    }
+  }
+  throw last;
+}
+
+// Answers + start time kept in this browser, so a reload, a crash or a closed tab
+// never loses work, and the timer continues where it was (no extra time).
+export const examKey = (type, id, user) => `exam:${type}:${id}:${user?.id ?? user?.username ?? 'anon'}`;
+export const examStore = {
+  load(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+  },
+  save(key, data) {
+    try { localStorage.setItem(key, JSON.stringify({ ...data, savedAt: Date.now() })); } catch { /* full or blocked */ }
+  },
+  clear(key) {
+    try { localStorage.removeItem(key); localStorage.removeItem(`${key}:violations`); } catch { /* ignore */ }
+  },
+};
+
+export function SendError({ onRetry }) {
+  return (
+    <div className="rx-modal-bg">
+      <div className="rx-modal">
+        <h3>Your answers could not be sent</h3>
+        <p>The internet connection seems to be down. Your answers are saved on this computer,
+          so nothing is lost. Check the Wi-Fi, then press <b>Try again</b>.</p>
+        <div className="rx-modal-btns"><button className="rx-danger" onClick={onRetry}>Try again</button></div>
+      </div>
     </div>
   );
 }

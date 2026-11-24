@@ -22,6 +22,15 @@ class ReadingTestSerializer(serializers.ModelSerializer):
         model = ReadingTest
         fields = ['id', 'title', 'passages']
 
+class ReadingTestListSerializer(serializers.ModelSerializer):
+    """Light version for the list page (no passage texts)."""
+    passages_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ReadingTest
+        fields = ['id', 'title', 'passages_count']
+
+
 class ReadingAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReadingAttempt

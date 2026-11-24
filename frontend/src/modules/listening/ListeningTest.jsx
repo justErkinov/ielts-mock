@@ -5,8 +5,10 @@ import { useAuth } from '../../context/AuthContext';
 import ScoreCard from '../../components/ScoreCard';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
-import { EXAM_CSS, ZoomableImage, useHighlighter, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
-import { groupTests } from './groups';
+import {
+  EXAM_CSS, ZoomableImage, useHighlighter, isPreview, PreviewGate, PreviewBadge,
+  postWithRetry, examKey, examStore, SendError,
+} from '../../components/examKit';
 
 /*
  * Real IELTS listening flow: Part 1-4 on one screen, the recording plays
@@ -83,6 +85,14 @@ export default function ListeningTest() {
   const [audio, setAudio] = useState({ cur: 0, dur: 0, playing: false, failed: false });
   const [volume, setVolume] = useState(1);
   const [review, setReview] = useState(null);   // seconds left after the recording ends
+  const [reviewEnds, setReviewEnds] = useState(null);   // when the 2-minute check ends (timestamp)
+  const [sendState, setSendState] = useState('idle');
+  const [loadError, setLoadError] = useState(false);
+  const key = examKey('listening', id, user);
+  const lastReason = useRef('manual');
+  const resumeAt = useRef(null);       // audio position to continue from after a reload
+  const reviewEndsRef = useRef(null);
+  reviewEndsRef.current = reviewEnds;
   const [currentQ, setCurrentQ] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState('');
@@ -94,12 +104,12 @@ export default function ListeningTest() {
   const submittingRef = useRef(false);
 
   useEffect(() => {
-    api.get(preview ? '/listening/?preview=1' : '/listening/').then(r => {
-      const group = groupTests(r.data).find(g => g.parts.some(p => String(p.id) === String(id)));
-      setParts(group ? group.parts : []);
-      const q = group?.parts[0]?.questions?.[0];
+    api.get(`/listening/${id}/group/`).then(r => {
+      setParts(r.data);
+      const q = r.data[0]?.questions?.[0];
       if (q) setCurrentQ(q.question_number);
-    }).finally(() => setLoading(false));
+    }).catch(e => { if (e?.response?.status === 404) setParts([]); else setLoadError(true); })
+      .finally(() => setLoading(false));
   }, [id]);
 
   const allQ = useMemo(() => (parts || []).flatMap((p, pi) =>
@@ -111,7 +121,10 @@ export default function ListeningTest() {
     if (preview) return;
     if (submittingRef.current || !parts) return;
     submittingRef.current = true;
+    lastReason.current = finishReason;
     setSubmitting(true);
+    setSendState('sending');
+    setError('');
     setConfirmOpen(false);
     audioRef.current?.pause();
     const byTest = {};
@@ -121,27 +134,30 @@ export default function ListeningTest() {
       if (isAnswered(v)) byTest[q.testId][q.question_number] = v;
     });
     try {
-      const res = await api.post('/listening/submit-all/', {
+      const res = await postWithRetry('/listening/submit-all/', {
         parts: byTest,
         time_spent: startedAt.current ? Math.round((Date.now() - startedAt.current) / 1000) : null,
         time_limit: 32 * 60,
         finish_reason: finishReason,
       });
+      examStore.clear(key);
+      setSendState('sent');
       setResult(res.data);
     } catch {
       submittingRef.current = false;
-      setError('Submission failed. Check the internet connection and press Submit again.');
+      setSendState('failed');
+      setError('failed');
     } finally {
       setSubmitting(false);
     }
-  }, [parts, allQ]);
+  }, [parts, allQ, key, preview]);
 
   const submitRef = useRef(submit);
   submitRef.current = submit;
 
   const { warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } = useAntiCheat({
     active: started && !result && !preview, onBlocked: () => submitRef.current('blocked'),
-    testType: 'listening', testId: id,
+    testType: 'listening', testId: id, persistKey: preview ? null : key,
   });
 
   useEffect(() => {
@@ -157,6 +173,7 @@ export default function ListeningTest() {
   };
 
   useEffect(() => {
+    if (reviewEndsRef.current) return;   // recording already finished (resumed during the 2-minute check)
     if (started && parts && audioIdx < parts.length) {
       setView(audioIdx);
       const a = audioRef.current;
@@ -169,15 +186,35 @@ export default function ListeningTest() {
 
   const onEnded = () => {
     if (audioIdx < parts.length - 1) setAudioIdx(i => i + 1);
-    else setReview(REVIEW_SECONDS);
+    else setReviewEnds(Date.now() + REVIEW_SECONDS * 1000);
   };
 
+  // 2-minute check, counted from a fixed end time
   useEffect(() => {
-    if (review === null || result) return;
-    if (review <= 0) { submitRef.current('timeout'); return; }
-    const tm = setTimeout(() => setReview(r => r - 1), 1000);
-    return () => clearTimeout(tm);
-  }, [review, result]);
+    if (!reviewEnds || result) return;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((reviewEnds - Date.now()) / 1000));
+      setReview(left);
+      if (left <= 0) submitRef.current('timeout');
+    };
+    tick();
+    const iv = setInterval(tick, 500);
+    return () => clearInterval(iv);
+  }, [reviewEnds, result]);
+
+  // Keep answers and the audio position in this browser while the test runs
+  const audioCur = useRef(0);
+  audioCur.current = audio.cur;
+  useEffect(() => {
+    if (!started || result || preview) return;
+    const save = () => examStore.save(key, {
+      startedAt: startedAt.current, answers: answersRef.current, audioIdx,
+      audioTime: audioCur.current, reviewEnds: reviewEndsRef.current,
+    });
+    save();
+    const iv = setInterval(save, 2000);
+    return () => clearInterval(iv);
+  }, [started, result, preview, key, audioIdx, reviewEnds, answers]);
 
   /* ---------- navigation ---------- */
   const goTo = n => {
@@ -195,8 +232,13 @@ export default function ListeningTest() {
 
   /* ---------- screens before / after ---------- */
   if (loading) return <div className="container"><p className="text-muted">Loading test...</p></div>;
+  if (loadError) return (
+    <div className="container"><p>The test could not be loaded. Check the internet connection.</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button></div>
+  );
   if (!parts || parts.length === 0) return <div className="container"><p>Test not found.</p></div>;
-  if (blocked) return <BlockedScreen onBack={() => navigate('/listening')} />;
+  if (blocked) return <BlockedScreen status={sendState === 'idle' ? 'sending' : sendState}
+    onRetry={() => submit(lastReason.current)} onBack={() => navigate('/listening')} />;
   if (result) return (
     <div className="container">
       <ScoreCard kind="listening" title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')}
@@ -205,8 +247,17 @@ export default function ListeningTest() {
   );
   if (!started && preview) return <PreviewGate title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
   if (!started) return (
-    <FullscreenGate title="Listening test — the recording plays once" onStart={async () => {
-      await enterFullscreen(); startedAt.current = Date.now(); setStarted(true);
+    <FullscreenGate title="Listening test — the recording plays once" resume={!!examStore.load(key)} onStart={async () => {
+      await enterFullscreen();
+      const saved = examStore.load(key);
+      startedAt.current = saved?.startedAt || Date.now();
+      if (saved) {
+        setAnswers(saved.answers || {});
+        setAudioIdx(Math.min(saved.audioIdx || 0, parts.length - 1));
+        resumeAt.current = saved.audioTime || 0;
+        if (saved.reviewEnds) { reviewEndsRef.current = saved.reviewEnds; setReviewEnds(saved.reviewEnds); }
+      }
+      setStarted(true);
     }} />
   );
 
@@ -304,7 +355,10 @@ export default function ListeningTest() {
       <style>{EXAM_CSS}</style>
       <audio ref={audioRef} src={parts[Math.min(audioIdx, parts.length - 1)].audio_url} preload="auto"
         onTimeUpdate={e => setAudio(s => ({ ...s, cur: e.target.currentTime }))}
-        onLoadedMetadata={e => setAudio(s => ({ ...s, dur: e.target.duration || 0 }))}
+        onLoadedMetadata={e => {
+          setAudio(s => ({ ...s, dur: e.target.duration || 0 }));
+          if (resumeAt.current) { e.target.currentTime = resumeAt.current; resumeAt.current = null; }
+        }}
         onPlay={() => setAudio(s => ({ ...s, playing: true }))}
         onPause={() => setAudio(s => ({ ...s, playing: false }))}
         onError={() => setAudio(s => ({ ...s, failed: true, playing: false }))}
@@ -408,15 +462,7 @@ export default function ListeningTest() {
         </div>
       )}
 
-      {error && (
-        <div className="rx-modal-bg">
-          <div className="rx-modal">
-            <h3>Could not submit</h3>
-            <p>{error}</p>
-            <div className="rx-modal-btns"><button className="rx-danger" onClick={() => setError('')}>OK</button></div>
-          </div>
-        </div>
-      )}
+      {error && <SendError onRetry={() => submit(lastReason.current)} />}
 
       {warning && (
         <ViolationWarning count={warning.count} deadline={warning.deadline}

@@ -5,7 +5,12 @@ import { useAuth } from '../../context/AuthContext';
 import ScoreCard from '../../components/ScoreCard';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
-import { addRange, HL_COLORS, HLText, EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
+import {
+  addRange, HL_COLORS, HLText, EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge,
+  postWithRetry, examKey, examStore, SendError,
+} from '../../components/examKit';
+
+const LIMIT = 60 * 60;
 
 /* ------------------------------------------------------------------ */
 /* Question grouping (real IELTS layout: "Questions 1–7" + instructions) */
@@ -179,8 +184,12 @@ export default function ReadingTest() {
   const [hl, setHl] = useState({});
   const [toolbar, setToolbar] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [secs, setSecs] = useState(60 * 60);
+  const [secs, setSecs] = useState(LIMIT);
   const [error, setError] = useState('');
+  const [sendState, setSendState] = useState('idle');   // idle | sending | sent | failed
+  const [loadError, setLoadError] = useState(false);
+  const key = examKey('reading', id, user);
+  const lastReason = useRef('manual');
 
   const startedAt = useRef(null);
   const answersRef = useRef(answers);
@@ -193,7 +202,8 @@ export default function ReadingTest() {
       setTest(r.data);
       const q = r.data.passages?.[0]?.questions?.[0];
       if (q) setCurrentQ(q.question_number);
-    }).finally(() => setLoading(false));
+    }).catch(e => { if (e?.response?.status !== 404) setLoadError(true); })
+      .finally(() => setLoading(false));
   }, [id]);
 
   const passages = useMemo(
@@ -208,24 +218,31 @@ export default function ReadingTest() {
     if (preview) return;
     if (submittingRef.current) return;
     submittingRef.current = true;
+    lastReason.current = finishReason;
     setSubmitting(true);
+    setSendState('sending');
+    setError('');
     setConfirmOpen(false);
-    const timeSpent = startedAt.current ? Math.round((Date.now() - startedAt.current) / 1000) : null;
+    const timeSpent = startedAt.current ? Math.min(LIMIT, Math.round((Date.now() - startedAt.current) / 1000)) : null;
     try {
-      const res = await api.post(`/reading/${id}/submit/`, {
-        answers: answersRef.current, time_spent: timeSpent, time_limit: 60 * 60, finish_reason: finishReason,
+      const res = await postWithRetry(`/reading/${id}/submit/`, {
+        answers: answersRef.current, time_spent: timeSpent, time_limit: LIMIT, finish_reason: finishReason,
       });
+      examStore.clear(key);
+      setSendState('sent');
       setResult(res.data);
     } catch {
       submittingRef.current = false;
-      setError('Submission failed. Check the internet connection and press Submit again.');
+      setSendState('failed');
+      setError('failed');
     } finally {
       setSubmitting(false);
     }
-  }, [id]);
+  }, [id, key, preview]);
 
   const { warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } = useAntiCheat({
-    active: started && !result && !preview, onBlocked: () => submit('blocked'), testType: 'reading', testId: id,
+    active: started && !result && !preview, onBlocked: () => submitRef.current('blocked'), testType: 'reading', testId: id,
+    persistKey: preview ? null : key,
   });
 
   useEffect(() => { if (result || blocked) exitFullscreen(); }, [result, blocked, exitFullscreen]);
@@ -233,11 +250,21 @@ export default function ReadingTest() {
   /* ---------- timer ---------- */
   const submitRef = useRef(submit);
   submitRef.current = submit;
+  // Counts from the real start time, so a throttled background tab or a reload never adds time
   useEffect(() => {
     if (!started || result) return;
-    const iv = setInterval(() => setSecs(s => (s > 0 ? s - 1 : 0)), 1000);
+    const tick = () => setSecs(Math.max(0, LIMIT - Math.floor((Date.now() - startedAt.current) / 1000)));
+    tick();
+    const iv = setInterval(tick, 500);
     return () => clearInterval(iv);
   }, [started, result]);
+
+  // Keep answers + highlights in this browser while the test runs
+  useEffect(() => {
+    if (!started || result || preview) return;
+    const t = setTimeout(() => examStore.save(key, { startedAt: startedAt.current, answers, hl, part }), 300);
+    return () => clearTimeout(t);
+  }, [answers, hl, part, started, result, preview, key]);
   useEffect(() => {
     if (started && secs === 0 && !result) submitRef.current('timeout');
   }, [secs, started, result]);
@@ -304,8 +331,13 @@ export default function ReadingTest() {
 
   /* ---------- screens before / after the exam ---------- */
   if (loading) return <div className="container"><p className="text-muted">Loading test...</p></div>;
+  if (loadError) return (
+    <div className="container"><p>The test could not be loaded. Check the internet connection.</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button></div>
+  );
   if (!test) return <div className="container"><p>Test not found.</p></div>;
-  if (blocked) return <BlockedScreen onBack={() => navigate('/reading')} />;
+  if (blocked) return <BlockedScreen status={sendState === 'idle' ? 'sending' : sendState}
+    onRetry={() => submit(lastReason.current)} onBack={() => navigate('/reading')} />;
   if (result) return (
     <div className="container">
       <ScoreCard kind="reading" title={test.title} score={result.score} total={result.total} detail={result.detail}
@@ -314,8 +346,12 @@ export default function ReadingTest() {
   );
   if (!started && preview) return <PreviewGate title={test.title} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
   if (!started) return (
-    <FullscreenGate title={test.title} onStart={async () => {
-      await enterFullscreen(); startedAt.current = Date.now(); setStarted(true);
+    <FullscreenGate title={test.title} resume={!!examStore.load(key)} onStart={async () => {
+      await enterFullscreen();
+      const saved = examStore.load(key);
+      startedAt.current = saved?.startedAt || Date.now();
+      if (saved) { setAnswers(saved.answers || {}); setHl(saved.hl || {}); setPart(saved.part || 0); }
+      setStarted(true);
     }} />
   );
 
@@ -531,15 +567,7 @@ export default function ReadingTest() {
         </div>
       )}
 
-      {error && (
-        <div className="rx-modal-bg">
-          <div className="rx-modal">
-            <h3>Could not submit</h3>
-            <p>{error}</p>
-            <div className="rx-modal-btns"><button className="rx-danger" onClick={() => setError('')}>OK</button></div>
-          </div>
-        </div>
-      )}
+      {error && <SendError onRetry={() => submit(lastReason.current)} />}
 
       {warning && (
         <ViolationWarning count={warning.count} deadline={warning.deadline}

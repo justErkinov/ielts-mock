@@ -3,6 +3,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import WritingTest, WritingAttempt
 from .serializers import WritingTestSerializer, WritingAttemptSerializer
+from examutil import can_open, recent_duplicate
+
+MAX_TEXT = 20000
 
 class WritingTestListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -22,6 +25,8 @@ class WritingTestDetailView(APIView):
             test = WritingTest.objects.get(pk=pk)
         except WritingTest.DoesNotExist:
             return Response({'error': 'Topilmadi'}, status=404)
+        if not can_open(test, request.user):
+            return Response({'error': 'Topilmadi'}, status=404)
         serializer = WritingTestSerializer(test, context={'request': request})
         return Response(serializer.data)
 
@@ -36,18 +41,22 @@ class WritingSubmitView(APIView):
 
         # Empty tasks are accepted on purpose: whatever the student wrote
         # (even only Task 2, or nothing on timeout) must reach the teacher.
-        task1 = (request.data.get('task1_text') or '').strip()
-        task2 = (request.data.get('task2_text') or '').strip()
+        if not can_open(test, request.user):
+            return Response({'error': 'Topilmadi'}, status=404)
+        task1 = str(request.data.get('task1_text') or '').strip()[:MAX_TEXT]
+        task2 = str(request.data.get('task2_text') or '').strip()[:MAX_TEXT]
 
-        attempt = WritingAttempt.objects.create(
-            user=request.user,
-            test=test,
-            task1_text=task1,
-            task2_text=task2,
-        )
-
-        from notifications.telegram import notify_writing
-        notify_writing(request.user, attempt, time_info=request.data)
+        # The browser may resend after a network drop: never store / notify twice
+        attempt = recent_duplicate(WritingAttempt, request.user, test, task1_text=task1, task2_text=task2)
+        if attempt is None:
+            attempt = WritingAttempt.objects.create(
+                user=request.user,
+                test=test,
+                task1_text=task1,
+                task2_text=task2,
+            )
+            from notifications.telegram import notify_writing
+            notify_writing(request.user, attempt, time_info=request.data)
 
         return Response({
             'message': 'Muvaffaqiyatli topshirildi. Ustoz tekshiradi.',

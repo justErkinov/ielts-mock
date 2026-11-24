@@ -3,21 +3,44 @@ from django.conf import settings
 from django.utils import timezone
 
 
-def _send(text):
+def _split(text, size=3900):
+    """Telegram allows 4096 characters per message: cut long texts at paragraph
+    or word boundaries so nothing is lost."""
+    parts = []
+    while len(text) > size:
+        cut = text.rfind('\n', 0, size)
+        if cut < size // 2:
+            cut = text.rfind(' ', 0, size)
+        if cut < size // 2:
+            cut = size
+        parts.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    if text:
+        parts.append(text)
+    return parts
+
+
+def _send(text, *more):
     """Sends in a background thread with retries, so a slow or failing
-    Telegram API never blocks the student's request. If Telegram rejects
-    the Markdown (e.g. a student essay contains * or _), the message is
-    re-sent as plain text instead of being lost."""
+    Telegram API never blocks the student's request.
+    `text` uses Markdown; if Telegram rejects it, it is re-sent as plain text.
+    `more` are extra plain-text messages (e.g. full essays) sent after it, in order."""
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         print("Telegram credentials not configured!")
         return
 
-    def worker():
+    messages = [(text[:4096], True)]
+    for m in more:
+        messages += [(p, False) for p in _split(m)]
+
+    def deliver(body, markdown):
         import time
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "Markdown"}
+        payload = {"chat_id": chat_id, "text": body}
+        if markdown:
+            payload["parse_mode"] = "Markdown"
         for attempt in range(5):
             try:
                 r = requests.post(url, json=payload, timeout=(10, 30))
@@ -30,6 +53,10 @@ def _send(text):
             except Exception as e:
                 print(f"Telegram error (attempt {attempt + 1}/5): {e}")
             time.sleep(5 * (attempt + 1))
+
+    def worker():
+        for body, markdown in messages:
+            deliver(body, markdown)
 
     import threading
     threading.Thread(target=worker, daemon=True).start()
@@ -182,13 +209,13 @@ def notify_listening_group(user, part_scores, score, total, time_info=None):
 
 
 def notify_writing(user, attempt, time_info=None):
-    def task_block(label, text, min_words, limit):
+    """A summary message, then each task's FULL text in its own message(s)."""
+    def summary(label, text, min_words):
         words = len(text.split())
         if not text:
             return f"📌 *{label}* — ⚠️ *NOT WRITTEN (0 words)*"
         short = f" ⚠️ under {min_words}" if words < min_words else ""
-        body = (text[:limit] + '...') if len(text) > limit else text
-        return f"📌 *{label}* ({words} words{short}):\n{body}"
+        return f"📌 *{label}*: {words} words{short}"
 
     task_times = ""
     if time_info:
@@ -198,16 +225,23 @@ def notify_writing(user, attempt, time_info=None):
             task_times = (f"\n🕐 Task 1 time: {_fmt_duration(tt1)} (recommended 20 min)"
                           f"\n🕐 Task 2 time: {_fmt_duration(tt2)} (recommended 40 min)")
 
+    name = user.get_full_name() or user.username
+    t1, t2 = attempt.task1_text or '', attempt.task2_text or ''
+    essays = []
+    for label, text in (('Task 1', t1), ('Task 2', t2)):
+        if text:
+            essays.append(f"{label} — {name} ({len(text.split())} words)\n\n{text}")
     _send(
         f"✍️ *WRITING SUBMISSION*\n\n"
-        f"👤 Student: {user.get_full_name() or user.username}\n"
+        f"👤 Student: {name}\n"
         f"📅 Date: {_tashkent(attempt.submitted_at)}\n"
         f"📝 Test: {attempt.test.title}"
         f"{_time_block(time_info)}"
         f"{task_times}\n\n"
-        f"{task_block('Task 1', attempt.task1_text or '', 150, 1500)}\n\n"
-        f"{task_block('Task 2', attempt.task2_text or '', 250, 2000)}\n\n"
-        f"⏳ _Awaiting teacher review_"
+        f"{summary('Task 1', t1, 150)}\n"
+        f"{summary('Task 2', t2, 250)}\n\n"
+        f"⏳ _Full texts follow below. Awaiting teacher review_",
+        *essays,
     )
 
 

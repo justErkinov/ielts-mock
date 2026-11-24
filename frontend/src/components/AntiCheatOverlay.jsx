@@ -20,7 +20,7 @@ const box = {
   boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
 };
 
-export function FullscreenGate({ onStart, title }) {
+export function FullscreenGate({ onStart, title, resume }) {
   const navigate = useNavigate();
   const rules = [
     'The test opens in fullscreen. Stay on this screen until you submit.',
@@ -39,11 +39,16 @@ export function FullscreenGate({ onStart, title }) {
         <ol style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
           {rules.map(r => <li key={r} style={{ fontSize: 14, lineHeight: 1.55, color: '#374151' }}>{r}</li>)}
         </ol>
+        {resume && (
+          <p style={{ background: '#ecfdf5', color: '#047857', borderRadius: 8, padding: '10px 12px', fontSize: 13.5, lineHeight: 1.5, marginBottom: 14 }}>
+            You already started this test. Your answers are saved and the time continues from where it was.
+          </p>
+        )}
         <button onClick={onStart} style={{
           width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8,
           padding: '13px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
         }}>
-          I am ready — start the test
+          {resume ? 'Continue the test' : 'I am ready — start the test'}
         </button>
         <button onClick={() => navigate(-1)} style={{
           width: '100%', marginTop: 8, background: 'transparent', color: '#6b7280', border: 'none',
@@ -90,18 +95,31 @@ export function ViolationWarning({ count, max = MAX_VIOLATIONS, onDismiss, deadl
   );
 }
 
-export function BlockedScreen({ onBack }) {
+export function BlockedScreen({ onBack, status = 'sent', onRetry }) {
+  const text = {
+    sending: 'You left the test screen too many times, or did not return in time. Sending your answers to your teacher…',
+    sent: 'You left the test screen too many times, or did not return in time. Your answers up to this point have been submitted and sent to your teacher.',
+    failed: 'You left the test screen too many times, or did not return in time. Your answers could not be sent because the internet is down. They are saved on this computer — check the Wi-Fi and press Try again.',
+  }[status] || '';
   return (
     <div style={{ ...backdrop, background: '#f3f4f6' }}>
       <div style={{ ...box, maxWidth: 460, padding: 34, textAlign: 'center', borderTop: '6px solid #dc2626' }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, color: '#dc2626' }}>Test submitted and locked</h2>
-        <p style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.6, marginBottom: 22 }}>
-          You left the test screen too many times, or did not return in time.
-          Your answers up to this point have been submitted and sent to your teacher.
-        </p>
-        <button onClick={onBack} style={{
+        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, color: '#dc2626' }}>
+          {status === 'sent' ? 'Test submitted and locked' : 'Test locked'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#4b5563', lineHeight: 1.6, marginBottom: 22 }}>{text}</p>
+        {status === 'failed' && (
+          <button onClick={onRetry} style={{
+            width: '100%', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8,
+            padding: '12px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 8,
+          }}>
+            Try again
+          </button>
+        )}
+        <button onClick={onBack} disabled={status === 'sending'} style={{
           width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8,
-          padding: '12px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+          padding: '12px 16px', fontSize: 15, fontWeight: 700, cursor: status === 'sending' ? 'wait' : 'pointer',
+          opacity: status === 'sending' ? 0.5 : 1,
         }}>
           Back to tests
         </button>

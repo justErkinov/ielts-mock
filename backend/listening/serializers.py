@@ -15,6 +15,15 @@ class ListeningTestSerializer(serializers.ModelSerializer):
         model = ListeningTest
         fields = ['id', 'title', 'audio_url', 'questions']
 
+class ListeningTestListSerializer(serializers.ModelSerializer):
+    """Light version for the list page (no questions)."""
+    question_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ListeningTest
+        fields = ['id', 'title', 'question_count']
+
+
 class ListeningAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = ListeningAttempt

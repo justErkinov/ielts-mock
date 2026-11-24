@@ -4,7 +4,10 @@ import api from '../../services/api';
 import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
 import { useAuth } from '../../context/AuthContext';
-import { EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge } from '../../components/examKit';
+import {
+  EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge,
+  postWithRetry, examKey, examStore, SendError,
+} from '../../components/examKit';
 
 const MIN1 = 150, MIN2 = 250;
 const TASK1_MINS = 20, TASK2_MINS = 40;
@@ -14,18 +17,18 @@ const TOTAL_MINS = TASK1_MINS + TASK2_MINS; // one shared 60-minute clock, like 
 
 // One countdown for the whole Writing test. It is based on a fixed end time,
 // so switching between Task 1 and Task 2 never pauses it.
-function useExamTimer(minutes, running) {
+function useExamTimer(minutes, running, startedAtRef) {
   const [secs, setSecs] = useState(minutes * 60);
-  const endRef = useRef(null);
 
   useEffect(() => {
     if (!running) return;
-    if (!endRef.current) endRef.current = Date.now() + minutes * 60 * 1000;
-    const tick = () => setSecs(Math.max(0, Math.ceil((endRef.current - Date.now()) / 1000)));
+    // counted from the real start time: a reload continues the clock, never resets it
+    const end = (startedAtRef.current || Date.now()) + minutes * 60 * 1000;
+    const tick = () => setSecs(Math.max(0, Math.ceil((end - Date.now()) / 1000)));
     tick();
     const iv = setInterval(tick, 500);
     return () => clearInterval(iv);
-  }, [running, minutes]);
+  }, [running, minutes, startedAtRef]);
 
   // Short beep when 5 minutes are left
   useEffect(() => {
@@ -63,13 +66,27 @@ export default function WritingTest() {
   const [started, setStarted] = useState(false);
   const [confirm, setConfirm] = useState(null); // list of problems before submit
   const [error, setError] = useState('');
+  const [sendState, setSendState] = useState('idle');
+  const [loadError, setLoadError] = useState(false);
   const startedAtRef = useRef(null);
+  const sendingRef = useRef(false);
+  const lastReason = useRef('manual');
+  const key = examKey('writing', id, user);
 
   useEffect(() => {
-    api.get(`/writing/${id}/`).then(r => setTest(r.data)).finally(() => setLoading(false));
+    api.get(`/writing/${id}/`).then(r => setTest(r.data))
+      .catch(e => { if (e?.response?.status !== 404) setLoadError(true); })
+      .finally(() => setLoading(false));
   }, [id]);
 
-  const timer = useExamTimer(TOTAL_MINS, started && !submitted);
+  const timer = useExamTimer(TOTAL_MINS, started && !submitted, startedAtRef);
+
+  // The essays are kept in this browser while the student writes
+  useEffect(() => {
+    if (!started || submitted || preview) return;
+    const t = setTimeout(() => examStore.save(key, { startedAt: startedAtRef.current, task1, task2, activeTask }), 400);
+    return () => clearTimeout(t);
+  }, [task1, task2, activeTask, started, submitted, preview, key]);
 
   // How long the student spent on each task (for the teacher's report only)
   const spentRef = useRef({ 1: 0, 2: 0 });
@@ -106,27 +123,26 @@ export default function WritingTest() {
     doSubmit();
   };
 
-  const doSubmit = async () => {
-    if (preview) return;
-    setConfirm(null);
-    setSubmitting(true);
+  // One way to send, used by the Submit button, the timer and the anti-cheat lock.
+  // It retries by itself; if the internet stays down the essays stay saved here.
+  const send = async (finishReason) => {
+    if (preview || submitted || sendingRef.current) return;
+    sendingRef.current = true;
+    lastReason.current = finishReason;
+    setConfirm(null); setError('');
+    setSubmitting(true); setSendState('sending');
     try {
-      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo('manual') });
+      await postWithRetry(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo(finishReason) });
+      examStore.clear(key);
+      setSendState('sent');
       setSubmitted(true); window.scrollTo(0, 0);
-    } catch { setError('Submission failed. Check the internet connection and press Submit again.'); }
-    finally { setSubmitting(false); }
+    } catch {
+      setSendState('failed');
+      setError('failed');
+    } finally { sendingRef.current = false; setSubmitting(false); }
   };
-
-  const forceSubmit = async (finishReason = 'timeout') => {
-    if (preview) return;
-    if (submitting || submitted) return;
-    setSubmitting(true);
-    try {
-      await api.post(`/writing/${id}/submit/`, { task1_text: task1, task2_text: task2, ...timeInfo(finishReason) });
-      setSubmitted(true);
-    } catch {}
-    finally { setSubmitting(false); }
-  };
+  const doSubmit = () => send('manual');
+  const forceSubmit = (finishReason = 'timeout') => send(finishReason);
 
   // 60 minutes are over -> both tasks are submitted automatically
   useEffect(() => {
@@ -134,9 +150,16 @@ export default function WritingTest() {
   }, [timer.isExpired, started]);
 
   const { violations, warning, blocked, dismissWarning, enterFullscreen, exitFullscreen } =
-    useAntiCheat({ active: started && !submitted && !preview, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id });
+    useAntiCheat({ active: started && !submitted && !preview, onBlocked: () => forceSubmit('blocked'), testType: 'writing', testId: id,
+      persistKey: preview ? null : key });
 
-  const handleStart = async () => { await enterFullscreen(); startedAtRef.current = Date.now(); setStarted(true); };
+  const handleStart = async () => {
+    await enterFullscreen();
+    const saved = examStore.load(key);
+    startedAtRef.current = saved?.startedAt || Date.now();
+    if (saved) { setTask1(saved.task1 || ''); setTask2(saved.task2 || ''); setActiveTask(saved.activeTask || 1); }
+    setStarted(true);
+  };
 
   useEffect(() => { if (submitted || blocked) exitFullscreen(); }, [submitted, blocked]);
 
@@ -150,10 +173,15 @@ export default function WritingTest() {
   }, []);
 
   if (loading) return <div className="container"><p className="text-muted">Loading...</p></div>;
+  if (loadError) return (
+    <div className="container"><p>The test could not be loaded. Check the internet connection.</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button></div>
+  );
   if (!test) return <div className="container"><p>Test not found.</p></div>;
-  if (blocked) return <BlockedScreen onBack={() => navigate('/writing')} />;
+  if (blocked) return <BlockedScreen status={sendState === 'idle' ? 'sending' : sendState}
+    onRetry={() => send(lastReason.current)} onBack={() => navigate('/writing')} />;
   if (!started && preview) return <PreviewGate title={test.title} onStart={() => { startedAtRef.current = Date.now(); setStarted(true); }} />;
-  if (!started) return <FullscreenGate title={test.title} onStart={handleStart} />;
+  if (!started) return <FullscreenGate title={test.title} resume={!!examStore.load(key)} onStart={handleStart} />;
 
   if (submitted) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 56px)' }}>
@@ -233,7 +261,8 @@ export default function WritingTest() {
         </button>
       </footer>
 
-      {(confirm || error) && (
+      {error && <SendError onRetry={() => send(lastReason.current)} />}
+      {confirm && !error && (
         <div className="rx-modal-bg">
           <div className="rx-modal">
             <h3>{error ? 'Could not submit' : 'Submit anyway?'}</h3>

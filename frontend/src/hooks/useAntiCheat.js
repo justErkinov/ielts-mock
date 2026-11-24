@@ -31,15 +31,17 @@ const isEditable = (el) =>
  * In Chrome, fullscreen + Keyboard Lock also captures Esc and most system
  * shortcuts, so a single Esc press no longer exits fullscreen.
  */
-export function useAntiCheat({ active, onBlocked, testType, testId }) {
-  const [violations, setViolations] = useState(0);
+export function useAntiCheat({ active, onBlocked, testType, testId, persistKey }) {
+  const vKey = persistKey ? `${persistKey}:violations` : null;
+  const stored = () => { try { return Number(localStorage.getItem(vKey)) || 0; } catch { return 0; } };
+  const [violations, setViolations] = useState(() => (vKey ? stored() : 0));
   const [warning, setWarning] = useState(null); // { count, reason, deadline } | null
   const [blocked, setBlocked] = useState(false);
 
   const activeRef = useRef(active);
   const blockedRef = useRef(false);
   const warningRef = useRef(null);
-  const countRef = useRef(0);
+  const countRef = useRef(violations);
   const lastAt = useRef(0);
   const onBlockedRef = useRef(onBlocked);
 
@@ -73,6 +75,7 @@ export function useAntiCheat({ active, onBlocked, testType, testId }) {
     const next = countRef.current + 1;
     countRef.current = next;
     setViolations(next);
+    if (vKey) { try { localStorage.setItem(vKey, String(next)); } catch { /* ignore */ } }
     report(reason, next);
 
     if (next >= MAX_VIOLATIONS) {
@@ -82,7 +85,7 @@ export function useAntiCheat({ active, onBlocked, testType, testId }) {
       warningRef.current = w;
       setWarning(w);
     }
-  }, [report, block]);
+  }, [report, block, vKey]);
 
   // Grace period: no "Return to test" click within GRACE_SECONDS -> removed
   useEffect(() => {

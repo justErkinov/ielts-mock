@@ -26,7 +26,7 @@ export default function ListeningList() {
         : <div className="grid-2">
             {groupTests(tests).map(g => ({
               id: g.parts[0].id, title: g.base,
-              count: g.parts.reduce((n, p) => n + (p.questions?.length || 0), 0), nParts: g.parts.length,
+              count: g.parts.reduce((n, p) => n + (p.question_count ?? p.questions?.length ?? 0), 0), nParts: g.parts.length,
             })).map(t => (
               <div key={t.id} className="card" style={{ transition: 'box-shadow 0.15s, transform 0.15s' }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow='var(--shadow-md)'; e.currentTarget.style.transform='translateY(-2px)'; }}
