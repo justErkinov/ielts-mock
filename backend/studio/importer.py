@@ -17,7 +17,7 @@ editor for the teacher to review before saving.
 import io
 import re
 
-from .textformat import parse_questions, IMG_RE
+from .textformat import parse_questions, IMG_RE, _option_run, LETTERS
 
 PART_HDR = re.compile(r'^\s*(?:PART|SECTION)\s*(\d)\b\s*:?\s*$', re.I)
 QHDR = re.compile(r'^\s*questions?\s+(\d{1,2})(?:\s*(?:[-–—]|to|and|&)\s*(\d{1,2}))?', re.I)
@@ -249,7 +249,7 @@ def split_listening(lines):
     for p in range(1, 5):
         text = '\n'.join(parts[p]).strip()
         text = re.sub(r'\n{3,}', '\n\n', text)
-        text, note = _label_picture_questions(text, p)
+        text, note = _label_picture_questions(text, p, answers[p])
         if note:
             warnings.append(note)
         result.append({'questions': text + ('\n' if text else ''),
@@ -259,9 +259,47 @@ def split_listening(lines):
     return result, warnings
 
 
-def _label_picture_questions(text, part):
+NUM_WORDS = {2: 'TWO', 3: 'THREE', 4: 'FOUR', 5: 'FIVE', 6: 'SIX', 7: 'SEVEN', 8: 'EIGHT', 9: 'NINE', 10: 'TEN'}
+WORD_LIMIT = {1: 'ONE WORD ONLY', 2: 'NO MORE THAN TWO WORDS', 3: 'NO MORE THAN THREE WORDS'}
+
+
+def _picture_kind(text):
+    low = text.lower()
+    for word in ('map', 'plan', 'diagram'):
+        if re.search(rf'\b{word}\b', low):
+            return word
+    return 'diagram'
+
+
+def _picture_instruction(kind, a, b, box, answer_lines):
+    """The same wording as the official IELTS papers, built from what is known:
+    how many questions, the letters of the box, and the answers themselves."""
+    rng = f'{a}–{b}'
+    first = f'Label the {kind} below.'
+    if box:
+        last = LETTERS[box - 1]
+        count = NUM_WORDS.get(b - a + 1)
+        choose = f'Choose {count} answers from the box and write' if count and box > b - a + 1 else 'Write'
+        return [first, f'{choose} the correct letter, A–{last}, next to Questions {rng}.']
+    vals = {}
+    for l in answer_lines:
+        m = re.match(r'^(\d{1,2})\s+(.*)$', l)
+        if m and a <= int(m.group(1)) <= b:
+            vals[int(m.group(1))] = m.group(2).strip()
+    if vals and all(re.fullmatch(r'[A-Za-z]', v) for v in vals.values()):
+        last = max(v.upper() for v in vals.values())
+        return [first, f'Write the correct letter, A–{last}, next to Questions {rng}.']
+    if vals:
+        words = max(len(re.split(r'\s*(?:/|\bOR\b)\s*', v)[0].split()) for v in vals.values())
+        has_num = any(re.search(r'\d', v) for v in vals.values())
+        limit = WORD_LIMIT.get(words, f'NO MORE THAN {NUM_WORDS.get(words, words)} WORDS')
+        return [first, f'Write {limit}{" AND/OR A NUMBER" if has_num else ""} for each answer.']
+    return [first]
+
+
+def _label_picture_questions(text, part, answer_lines=()):
     """Questions that exist only as labels inside a picture ('21 ......' on a diagram):
-    add 'Questions 21-26' + the numbers right after the picture."""
+    add 'Questions 21-26', an official-style instruction and the numbers after the picture."""
     if not text:
         return text, None
     groups, _, _ = parse_questions(text)
@@ -282,13 +320,28 @@ def _label_picture_questions(text, part):
     nxt = min((q['number'] for g in after for q in g['questions']), default=None)
     if nxt is not None and nxt < a:
         return text, None
-    # already under a "Questions a-b" header? then only the numbers are needed
-    has_hdr = any(QHDR.match(l) and int(QHDR.match(l).group(1)) == a for l in lines[max(0, i - 4):i])
-    block = [] if has_hdr else [f'Questions {a}-{b}', 'Label the picture below.']
-    block += [lines[i]] + [str(n) for n in range(a, b + 1)]
-    lines[i:i + 1] = block
-    return '\n'.join(lines), (f'Part {part}: questions {a}–{b} are inside the picture. They were added under '
-                              f'the picture — check the instructions and the preview.')
+
+    # a box of lettered options right after the picture (e.g. "Functions  A ... I")
+    box = 0
+    for j in range(i + 1, min(len(lines), i + 4)):
+        if QHDR.match(lines[j]):
+            break
+        kind, opts, _ = _option_run(lines, j)
+        if kind == 'letter':
+            box = len(opts)
+            break
+    # instruction lines already written above the picture (under a "Questions a-b" header)
+    hdr = next((k for k in range(i - 1, max(-1, i - 6), -1)
+                if QHDR.match(lines[k]) and int(QHDR.match(lines[k]).group(1)) == a), None)
+    instr = _picture_instruction(_picture_kind('\n'.join(lines[max(0, i - 6):i + 12])), a, b, box, answer_lines)
+    if hdr is not None:
+        existing = [l for l in lines[hdr + 1:i] if l.strip()]
+        block = ([] if existing else instr) + [lines[i]] + [str(n) for n in range(a, b + 1)]
+        lines[i:i + 1] = block
+    else:
+        lines[i:i + 1] = [f'Questions {a}–{b}'] + instr + [lines[i]] + [str(n) for n in range(a, b + 1)]
+    return '\n'.join(lines), (f'Part {part}: questions {a}–{b} are labels inside the picture. They were added '
+                              f'under it with the standard instructions — check them in the preview.')
 
 
 def import_listening(name, data, save_image):
