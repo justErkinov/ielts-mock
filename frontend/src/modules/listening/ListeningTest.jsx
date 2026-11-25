@@ -10,6 +10,7 @@ import {
   postWithRetry, examKey, examStore, SendError, NoteHeads,
 } from '../../components/examKit';
 import { splitTitle } from './groups';
+import { useAudioPrep, boostAudio } from '../../components/audioPrep';
 
 // One recording for the whole test: every part has the same file, Part 2-4 may carry
 // their start time as '#t=SECONDS' (set by the teacher in the studio).
@@ -175,9 +176,15 @@ export default function ListeningTest() {
   const starts = single ? parts.map((p, i) => (i === 0 ? 0 : startOf(p.audio_url))) : [];
   const singleRef = useRef(false);
   singleRef.current = single;
+  // whole recording downloaded before the start, then played from this computer
+  const prep = useAudioPrep(parts ? parts.map(p => baseUrl(p.audio_url)) : null, !!parts && !result);
+  const srcOf = u => prep.map[baseUrl(u)] || baseUrl(u);
+  const boostRef = useRef(null);
   const play = () => {
     const a = audioRef.current;
     if (!a) return;
+    if (!boostRef.current && a.src.startsWith('blob:')) boostRef.current = boostAudio(a, prep.gain);
+    if (boostRef.current) boostRef.current.set(volume);
     a.play().then(() => setAudio(s => ({ ...s, failed: false })))
       .catch(() => setAudio(s => ({ ...s, failed: true, playing: false })));
   };
@@ -204,7 +211,10 @@ export default function ListeningTest() {
     if (idx > audioIdx) setAudioIdx(idx);
   };
 
-  useEffect(() => { if (audioRef.current) audioRef.current.volume = volume; }, [volume]);
+  useEffect(() => {
+    if (boostRef.current) boostRef.current.set(volume);
+    else if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
 
   const onEnded = () => {
     if (!single && audioIdx < parts.length - 1) setAudioIdx(i => i + 1);
@@ -267,9 +277,9 @@ export default function ListeningTest() {
         score={result.score} total={result.total} detail={result.detail} onBack={() => navigate('/listening')} />
     </div>
   );
-  if (!started && preview) return <PreviewGate title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
+  if (!started && preview) return <PreviewGate prep={prep} title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;
   if (!started) return (
-    <FullscreenGate title="Listening test — the recording plays once" resume={!!examStore.load(key)} onStart={async () => {
+    <FullscreenGate prep={prep} title="Listening test — the recording plays once" resume={!!examStore.load(key)} onStart={async () => {
       await enterFullscreen();
       const saved = examStore.load(key);
       startedAt.current = saved?.startedAt || Date.now();
@@ -375,7 +385,7 @@ export default function ListeningTest() {
     <div className="rx-root" onMouseUp={onMouseUp}>
       {preview && <PreviewBadge />}
       <style>{EXAM_CSS}</style>
-      <audio ref={audioRef} src={single ? baseUrl(parts[0].audio_url) : parts[Math.min(audioIdx, parts.length - 1)].audio_url} preload="auto"
+      <audio ref={audioRef} src={single ? srcOf(parts[0].audio_url) : srcOf(parts[Math.min(audioIdx, parts.length - 1)].audio_url)} preload="auto"
         onTimeUpdate={e => { setAudio(s => ({ ...s, cur: e.target.currentTime })); onTime(e.target.currentTime); }}
         onLoadedMetadata={e => {
           setAudio(s => ({ ...s, dur: e.target.duration || 0 }));

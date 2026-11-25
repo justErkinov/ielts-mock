@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../services/api';
+import { AudioPrepNote } from './AntiCheatOverlay';
 
 /* ------------------------------------------------------------------ */
 /* Highlights                                                          */
@@ -377,7 +378,7 @@ export function isPreview(user) {
     && !!(user && (user.is_teacher || user.is_superuser));
 }
 
-export function PreviewGate({ title, onStart }) {
+export function PreviewGate({ title, onStart, prep }) {
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', fontFamily: 'Arial, sans-serif', padding: 20 }}>
       <div style={{ background: '#fff', borderRadius: 12, padding: 30, maxWidth: 460, boxShadow: '0 20px 50px rgba(0,0,0,.15)' }}>
@@ -386,7 +387,8 @@ export function PreviewGate({ title, onStart }) {
           You see the test exactly as students do. Fullscreen and the exam rules are off,
           and nothing you answer is saved or sent to Telegram.
         </p>
-        <button onClick={onStart} style={{ width: '100%', background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+        <AudioPrepNote prep={prep} />
+        <button onClick={onStart} disabled={prep?.status === 'loading'} style={{ width: '100%', background: '#111827', color: '#fff', border: 0, borderRadius: 8, padding: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: prep?.status === 'loading' ? 0.5 : 1 }}>
           Open preview
         </button>
       </div>

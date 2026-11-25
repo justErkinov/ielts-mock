@@ -20,7 +20,26 @@ const box = {
   boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
 };
 
-export function FullscreenGate({ onStart, title, resume }) {
+
+export function AudioPrepNote({ prep }) {
+  if (!prep || prep.status === 'idle') return null;
+  if (prep.status === 'loading') return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 13.5, color: '#374151', marginBottom: 6 }}>Preparing the audio… {prep.pct}%</div>
+      <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${prep.pct}%`, height: '100%', background: '#111827', transition: 'width .3s' }} />
+      </div>
+    </div>
+  );
+  if (prep.status === 'failed') return (
+    <p style={{ background: '#fffbeb', color: '#92400e', borderRadius: 8, padding: '10px 12px', fontSize: 13.5, lineHeight: 1.5, marginBottom: 14 }}>
+      The audio could not be downloaded in advance. It will play from the internet and may pause if the connection is slow.
+    </p>
+  );
+  return <p style={{ color: '#047857', fontSize: 13.5, marginBottom: 14 }}>✓ Audio is ready</p>;
+}
+
+export function FullscreenGate({ onStart, title, resume, prep }) {
   const navigate = useNavigate();
   const rules = [
     'The test opens in fullscreen. Stay on this screen until you submit.',
@@ -44,11 +63,13 @@ export function FullscreenGate({ onStart, title, resume }) {
             You already started this test. Your answers are saved and the time continues from where it was.
           </p>
         )}
-        <button onClick={onStart} style={{
+        <AudioPrepNote prep={prep} />
+        <button onClick={onStart} disabled={prep?.status === 'loading'} style={{
+          opacity: prep?.status === 'loading' ? 0.5 : 1,
           width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8,
           padding: '13px 16px', fontSize: 15, fontWeight: 700, cursor: 'pointer',
         }}>
-          {resume ? 'Continue the test' : 'I am ready — start the test'}
+          {prep?.status === 'loading' ? 'Preparing the audio…' : resume ? 'Continue the test' : 'I am ready — start the test'}
         </button>
         <button onClick={() => navigate(-1)} style={{
           width: '100%', marginTop: 8, background: 'transparent', color: '#6b7280', border: 'none',
