@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../services/api';
+import { isNoteTitle } from '../../components/examKit';
 
 export const KINDS = {
   listening: { label: 'Listening', icon: '🎧', unit: 'Part', count: 4 },
@@ -136,7 +137,7 @@ export function ParsedPreview({ parsed }) {
               const answers = (q.correct_answer || '').split('|').filter(Boolean);
               return (
                 <div key={q.question_number} className="st-pq">
-                  {lns.map((h, i) => <div key={i} className="st-phead">{h}</div>)}
+                  {lns.map((h, i) => <div key={i} className={isNoteTitle(h) ? 'st-phead' : 'st-pnote'}>{h}</div>)}
                   <div className="st-pline">
                     <span className="st-pnum">{q.question_number}</span>
                     <span className="st-ptext"><Blanked text={body} /></span>
@@ -339,6 +340,7 @@ export const STUDIO_CSS = `
 .st-pbox>b{display:block;margin-bottom:2px}
 .st-pq{margin:8px 0 10px}
 .st-phead{font-weight:700;font-size:13px;margin:8px 0 2px}
+.st-pnote{font-size:13px;margin:3px 0;color:var(--text)}
 .st-pline{display:flex;gap:8px;font-size:13.5px;line-height:1.55}
 .st-pnum{flex-shrink:0;min-width:24px;height:22px;border-radius:5px;background:var(--primary-light);color:var(--primary);font-weight:700;font-size:12px;display:inline-flex;align-items:center;justify-content:center}
 .st-blank{display:inline-block;width:64px;border-bottom:2px solid var(--text2);margin:0 4px;vertical-align:-2px}
@@ -381,5 +383,11 @@ export const STUDIO_CSS = `
 .st-new a:hover{border-color:var(--primary);box-shadow:var(--shadow-md)}
 .st-new a b{display:block;font-size:15px;margin:6px 0 2px}
 .st-new a span{font-size:12.5px;color:var(--text2)}
+.st-import{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--primary-light);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.st-import-ok{position:relative;background:var(--green-bg);color:var(--text);border-radius:8px;padding:10px 34px 10px 12px;font-size:13px;line-height:1.55}
+.st-import-ok b{color:var(--green)}
+.st-prob-err{position:relative}
+.st-x{position:absolute;top:4px;right:8px;border:0;background:none;font-size:18px;cursor:pointer;color:var(--text2)}
+.st-radio{display:inline-flex !important;align-items:center;gap:5px;font-weight:400 !important;color:var(--text) !important;font-size:12.5px;cursor:pointer;margin:0 !important}
 .st-wimg{margin-top:10px;max-width:100%;max-height:260px;border:1px solid var(--border);border-radius:8px;display:block}
 `;

@@ -264,6 +264,7 @@ export const EXAM_CSS = `
 .rx-legend td{padding:2px 14px 2px 0;vertical-align:top}
 .rx-notes{border:1px solid #d1d5db;border-radius:6px;padding:14px 16px;margin-top:10px}
 .rx-subhead { font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
+.rx-noteline { margin: 4px 0; font-size: 15px; line-height: 1.6; }
 .rx-notes > div:first-child > .rx-subhead:first-child { margin-top: 0; }
 .rx-gapline{line-height:2.4;font-size:14.5px;scroll-margin:90px}
 .rx-bullet{color:#6b7280}
@@ -358,6 +359,14 @@ export const EXAM_CSS = `
 .wx-prompt{border:1px solid #d1d5db;border-radius:6px;padding:16px 18px;font-size:15px;line-height:1.65;white-space:pre-wrap}
 .wx-timer-paused{opacity:.45}
 `;
+
+/* Lines above a question inside notes: short titles are bold, note lines are plain */
+export const isNoteTitle = h => !/^•/.test(h) && !h.includes(':') && !/[.?!,;]$/.test(h.trim()) && h.length < 60;
+export function NoteHeads({ heads }) {
+  return heads.map((h, i) => (isNoteTitle(h)
+    ? <p key={i} className="rx-subhead">{h}</p>
+    : <p key={i} className="rx-noteline">{h}</p>));
+}
 
 /* ------------------------------------------------------------------ */
 /* Teacher preview (?preview=1): no fullscreen, no anti-cheat, nothing is saved */

@@ -104,6 +104,20 @@ def finish(m, request):
     return request.build_absolute_uri(f'/api/studio/media/{m.id}/{m.name}'), 'database'
 
 
+def save_bytes(name, data, user, request):
+    """A picture taken out of an imported PDF / Word file."""
+    ext = (name or '').rsplit('.', 1)[-1].lower()
+    ctype = EXT_TYPES.get(ext) or ('image/png' if data[:4] == b'\x89PNG' else 'image/jpeg')
+    if not ctype.startswith('image/'):
+        ctype = 'image/jpeg'
+    if not name or '.' not in name:
+        name = 'picture.' + ('png' if ctype == 'image/png' else 'jpg')
+    m = start(name, ctype, len(data), user)
+    for i in range(0, len(data), CHUNK_SIZE):
+        put_chunk(m, i // CHUNK_SIZE, data[i:i + CHUNK_SIZE])
+    return finish(m, request)[0]
+
+
 def save_upload(f, user, request):
     """Single-request upload (small files / older clients)."""
     m = start(f.name, getattr(f, 'content_type', ''), f.size, user)

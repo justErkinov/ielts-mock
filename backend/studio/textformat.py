@@ -244,7 +244,8 @@ def parse_questions(text):
         elif q and q['gap'] and not g['pending'] and stripped[:1].islower():
             q['text'] = (q['text'] + ' ' + _blanks(stripped)).strip()  # notes line wrapped
         else:
-            g['pending'].append(BULLET_RE.sub('', stripped))
+            # keep a bullet as "• " so the screen shows it as a note line, not a heading
+            g['pending'].append(('• ' + BULLET_RE.sub('', stripped)) if BULLET_RE.match(stripped) else stripped)
         i += 1
 
     warnings = []

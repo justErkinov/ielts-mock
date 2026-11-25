@@ -7,7 +7,7 @@ import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
 import {
   addRange, HL_COLORS, HLText, EXAM_CSS, ZoomableImage, isPreview, PreviewGate, PreviewBadge,
-  postWithRetry, examKey, examStore, SendError,
+  postWithRetry, examKey, examStore, SendError, NoteHeads,
 } from '../../components/examKit';
 
 const LIMIT = 60 * 60;
@@ -381,7 +381,7 @@ export default function ReadingTest() {
     );
     return (
       <div key={q.id} id={`rq-${q.question_number}`}>
-        {heads.map((h, i) => <p key={i} className="rx-subhead">{h}</p>)}
+        <NoteHeads heads={heads} />
       <div className="rx-gapline">
         <span className="rx-bullet">•</span>{' '}
         <HLText id={`q${q.question_number}a`} text={parts[0]} ranges={hl[`q${q.question_number}a`]} onRemove={removeHighlight} />

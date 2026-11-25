@@ -7,8 +7,14 @@ import { useAntiCheat } from '../../hooks/useAntiCheat';
 import { FullscreenGate, ViolationWarning, BlockedScreen } from '../../components/AntiCheatOverlay';
 import {
   EXAM_CSS, ZoomableImage, useHighlighter, isPreview, PreviewGate, PreviewBadge,
-  postWithRetry, examKey, examStore, SendError,
+  postWithRetry, examKey, examStore, SendError, NoteHeads,
 } from '../../components/examKit';
+import { splitTitle } from './groups';
+
+// One recording for the whole test: every part has the same file, Part 2-4 may carry
+// their start time as '#t=SECONDS' (set by the teacher in the studio).
+const baseUrl = u => (u || '').split('#')[0];
+const startOf = u => { const m = (u || '').match(/#t=([\d.]+)/); return m ? Number(m[1]) : null; };
 
 /*
  * Real IELTS listening flow: Part 1-4 on one screen, the recording plays
@@ -105,7 +111,7 @@ export default function ListeningTest() {
 
   useEffect(() => {
     api.get(`/listening/${id}/group/`).then(r => {
-      setParts(r.data);
+      setParts(r.data.map((p, i) => ({ ...p, part: splitTitle(p.title).part || i + 1 })));
       const q = r.data[0]?.questions?.[0];
       if (q) setCurrentQ(q.question_number);
     }).catch(e => { if (e?.response?.status === 404) setParts([]); else setLoadError(true); })
@@ -165,6 +171,10 @@ export default function ListeningTest() {
   }, [result, blocked, exitFullscreen]);
 
   /* ---------- audio: plays once, part after part ---------- */
+  const single = !!parts && parts.length > 1 && parts.every(p => baseUrl(p.audio_url) === baseUrl(parts[0].audio_url));
+  const starts = single ? parts.map((p, i) => (i === 0 ? 0 : startOf(p.audio_url))) : [];
+  const singleRef = useRef(false);
+  singleRef.current = single;
   const play = () => {
     const a = audioRef.current;
     if (!a) return;
@@ -177,15 +187,27 @@ export default function ListeningTest() {
     if (started && parts && audioIdx < parts.length) {
       setView(audioIdx);
       const a = audioRef.current;
-      if (a) { a.load(); play(); }
+      // one recording: it is loaded once and just keeps playing; separate files: load the next one
+      if (a && (!singleRef.current || a.dataset.loaded !== '1')) {
+        a.dataset.loaded = '1';
+        a.load(); play();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioIdx, started]);
 
+  // one recording: follow the part being played by its start time
+  const onTime = cur => {
+    if (!singleRef.current) return;
+    let idx = 0;
+    starts.forEach((st, i) => { if (st !== null && cur >= st) idx = i; });
+    if (idx > audioIdx) setAudioIdx(idx);
+  };
+
   useEffect(() => { if (audioRef.current) audioRef.current.volume = volume; }, [volume]);
 
   const onEnded = () => {
-    if (audioIdx < parts.length - 1) setAudioIdx(i => i + 1);
+    if (!single && audioIdx < parts.length - 1) setAudioIdx(i => i + 1);
     else setReviewEnds(Date.now() + REVIEW_SECONDS * 1000);
   };
 
@@ -297,7 +319,7 @@ export default function ListeningTest() {
         const field = g.letters ? letterSelect(q, g.letters) : gapInput(q);
         return (
           <div key={q.id} id={`lq-${q.question_number}`}>
-          {heads.map((h, i) => <p key={i} className="rx-subhead">{h}</p>)}
+          <NoteHeads heads={heads} />
           <div className="rx-gapline">
             <span className="rx-bullet">•</span>{' '}
             {g.letters && <span className="rx-num" style={{ marginRight: 6 }}>{q.question_number}</span>}
@@ -353,8 +375,8 @@ export default function ListeningTest() {
     <div className="rx-root" onMouseUp={onMouseUp}>
       {preview && <PreviewBadge />}
       <style>{EXAM_CSS}</style>
-      <audio ref={audioRef} src={parts[Math.min(audioIdx, parts.length - 1)].audio_url} preload="auto"
-        onTimeUpdate={e => setAudio(s => ({ ...s, cur: e.target.currentTime }))}
+      <audio ref={audioRef} src={single ? baseUrl(parts[0].audio_url) : parts[Math.min(audioIdx, parts.length - 1)].audio_url} preload="auto"
+        onTimeUpdate={e => { setAudio(s => ({ ...s, cur: e.target.currentTime })); onTime(e.target.currentTime); }}
         onLoadedMetadata={e => {
           setAudio(s => ({ ...s, dur: e.target.duration || 0 }));
           if (resumeAt.current) { e.target.currentTime = resumeAt.current; resumeAt.current = null; }
@@ -373,7 +395,9 @@ export default function ListeningTest() {
           ) : (
             <div className="lx-audio">
               <span className="lx-audio-state">
-                {audio.failed ? 'Audio stopped' : audio.playing ? `Part ${parts[audioIdx].part} is playing` : 'Loading audio…'}
+                {audio.failed ? 'Audio stopped' : audio.playing
+                  ? (single && starts.slice(1).every(x => x === null) ? 'Recording is playing' : `Part ${parts[audioIdx].part} is playing`)
+                  : 'Loading audio…'}
               </span>
               {audio.failed && <button className="lx-play" onClick={play}>▶ Play</button>}
               <div className="lx-audio-bar"><i style={{ width: `${pct}%` }} /></div>

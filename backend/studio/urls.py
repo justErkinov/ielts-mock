@@ -7,6 +7,7 @@ urlpatterns = [
     path('parse/', views.ParseView.as_view()),
     path('upload/', views.UploadView.as_view()),
     path('upload/start/', views.UploadStartView.as_view()),
+    path('import/listening/', views.ImportListeningView.as_view()),
     path('upload/<uuid:pk>/chunk/', views.UploadChunkView.as_view()),
     path('upload/<uuid:pk>/finish/', views.UploadFinishView.as_view()),
     path('media/<uuid:pk>/<str:name>', views.MediaView.as_view()),

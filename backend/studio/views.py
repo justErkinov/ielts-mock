@@ -137,6 +137,39 @@ class UploadView(APIView):
         return Response({'url': url, 'storage': where, 'name': f.name, 'size': f.size})
 
 
+class ImportListeningView(APIView):
+    """A whole Listening test from a PDF / Word file (or pasted text):
+    -> {parts: [{questions, answers}] x4, warnings}. Pictures are saved and placed."""
+    permission_classes = [IsTeacher]
+
+    def post(self, request):
+        from .importer import import_listening
+        f = request.FILES.get('file')
+        if f is not None:
+            if f.size > 30 * 1024 * 1024:
+                return Response({'error': 'The file is too big (limit 30 MB).'}, status=400)
+            name, data = f.name, f.read()
+        else:
+            name, data = 'pasted.txt', str(request.data.get('text') or '').encode('utf-8')
+        if not data.strip():
+            return Response({'error': 'The file is empty.'}, status=400)
+
+        def save_image(img_name, img_data):
+            try:
+                return storage.save_bytes(img_name, img_data, request.user, request)
+            except Exception:
+                return None
+        try:
+            parts, warnings = import_listening(name, data, save_image)
+        except Exception:
+            return Response({'error': "This file could not be read. Save it as PDF or Word (.docx) and try again, "
+                                      "or copy the text and paste it."}, status=400)
+        if not any(p['questions'].strip() for p in parts):
+            return Response({'error': 'No questions were found in this file. Is it a scanned picture? '
+                                      'Then copy the questions as text instead.'}, status=400)
+        return Response({'parts': parts, 'warnings': warnings})
+
+
 class UploadStartView(APIView):
     """Chunked upload, step 1: {name, type, size} -> {id, chunk_size}"""
     permission_classes = [IsTeacher]

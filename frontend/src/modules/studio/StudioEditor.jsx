@@ -14,13 +14,13 @@ const TASK1_HINT = 'The chart below shows …\n\nSummarise the information by se
 const TASK2_HINT = 'Some people believe that …\n\nTo what extent do you agree or disagree?\n\nGive reasons for your answer and include any relevant examples from your own knowledge or experience.\n\nWrite at least 250 words.';
 
 /* Plays the uploaded audio and shows its length, or a clear message if it can't be played */
-function AudioCheck({ src }) {
+function AudioCheck({ src, audioRef }) {
   const [state, setState] = useState({ ok: null, dur: 0 });
   useEffect(() => { setState({ ok: null, dur: 0 }); }, [src]);
   const fmt = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   return (
     <div style={{ flex: 1, minWidth: 220 }}>
-      <audio controls preload="metadata" src={src} style={{ width: '100%', height: 36 }}
+      <audio ref={audioRef} controls preload="metadata" src={src} style={{ width: '100%', height: 36 }}
         onLoadedMetadata={e => setState({ ok: true, dur: e.target.duration || 0 })}
         onError={() => setState({ ok: false, dur: 0 })} />
       <div style={{ fontSize: 12, marginTop: 4 }}>
@@ -32,10 +32,70 @@ function AudioCheck({ src }) {
   );
 }
 
+const baseUrl = u => (u || '').split('#')[0];
+const startOf = u => { const m = (u || '').match(/#t=([\d.]+)/); return m ? Number(m[1]) : null; };
+const fmtTime = sec => (sec === null || sec === undefined || sec === '' ? '' : `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`);
+// "7:32", "7.32", "452" -> seconds; '' -> null; anything else -> NaN
+const parseTime = t => {
+  const v = String(t || '').trim();
+  if (!v) return null;
+  const m = v.match(/^(\d{1,3})[:.](\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  return /^\d+$/.test(v) ? Number(v) : NaN;
+};
+
+/* Listening: one recording for all parts (most books) or one file per part */
+function AudioPanel({ mode, setMode, full, setFull, starts, setStarts, sections, setPartAudio, partsUsed }) {
+  const ref = useRef(null);
+  return (
+    <div className="st-field" style={{ marginBottom: 18 }}>
+      <label>Audio
+        <span style={{ display: 'inline-flex', gap: 14 }}>
+          <label className="st-radio"><input type="radio" checked={mode === 'single'} onChange={() => setMode('single')} /> One file for the whole test</label>
+          <label className="st-radio"><input type="radio" checked={mode === 'separate'} onChange={() => setMode('separate')} /> A separate file for each part</label>
+        </span>
+      </label>
+      {mode === 'single' ? (
+        <div className="st-audio" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {full ? <AudioCheck src={full} audioRef={ref} /> : <span className="st-muted" style={{ flex: 1 }}>No audio yet. Upload the full recording (all parts in one mp3).</span>}
+            <UploadButton accept="audio/*" label={full ? 'Replace audio' : 'Upload audio'} onDone={url => setFull(url)} />
+          </div>
+          {full && partsUsed > 1 && (
+            <div style={{ marginTop: 10 }}>
+              <div className="st-muted" style={{ fontSize: 12.5, marginBottom: 6 }}>
+                Optional: when each part starts, so the students' screen turns to that part by itself.
+                Play the recording, pause where "Part 2" begins and press <b>Now</b>.
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                {Array.from({ length: partsUsed - 1 }, (_, k) => k + 1).map(i => {
+                  const bad = Number.isNaN(parseTime(starts[i]));
+                  return (
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      Part {i + 1} at
+                      <input className="st-link-in" style={{ width: 70, minWidth: 0, flex: 'none', borderColor: bad ? 'var(--accent)' : undefined }}
+                        placeholder="m:ss" value={starts[i] || ''}
+                        onChange={e => setStarts(s => s.map((x, j) => (j === i ? e.target.value : x)))} />
+                      <button type="button" className="btn btn-outline btn-sm"
+                        onClick={() => ref.current && setStarts(s => s.map((x, j) => (j === i ? fmtTime(ref.current.currentTime) : x)))}>Now</button>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="st-muted" style={{ fontSize: 12.5 }}>Upload each part's audio in its tab below.</div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* One Listening part or Reading passage                               */
 /* ------------------------------------------------------------------ */
-function SectionEditor({ kind, index, value, onChange, onStatus, visible }) {
+function SectionEditor({ kind, index, value, onChange, onStatus, visible, singleAudio }) {
   const qRef = useRef(null);
   const first = kind === 'listening' ? index * 10 + 1 : undefined;
   const last = kind === 'listening' ? index * 10 + 10 : undefined;
@@ -43,7 +103,7 @@ function SectionEditor({ kind, index, value, onChange, onStatus, visible }) {
   const set = (k, v) => onChange({ ...value, [k]: v });
 
   const missing = [];
-  if (kind === 'listening' && !value.audio_url.trim()) missing.push(`Part ${index + 1}: upload the audio file.`);
+  if (kind === 'listening' && !singleAudio && !value.audio_url.trim()) missing.push(`Part ${index + 1}: upload the audio file.`);
   if (kind === 'reading' && !value.text.trim()) missing.push(`Passage ${index + 1}: paste the passage text.`);
   const errors = [...missing, ...(parsed.errors || [])];
 
@@ -58,7 +118,7 @@ function SectionEditor({ kind, index, value, onChange, onStatus, visible }) {
   return (
     <div className="st-cols">
       <div>
-        {kind === 'listening' && (
+        {kind === 'listening' && !singleAudio && (
           <div className="st-field">
             <label>Audio for Part {index + 1} <span>mp3 or m4a, plays once in the test</span></label>
             <div className="st-audio">
@@ -133,6 +193,13 @@ export default function StudioEditor() {
     Array.from({ length: meta?.count || 1 }, () => emptySection(kind))));
   const [writing, setWriting] = useState({ task1: '', task1_image: '', task2: '' });
   const [tab, setTab] = useState(0);
+  const [audioMode, setAudioMode] = useState('single');
+  const [fullAudio, setFullAudio] = useState('');
+  const [starts, setStarts] = useState(['', '', '', '']);
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState(null);
+  const [confirmImport, setConfirmImport] = useState(null);
+  const importRef = useRef(null);
   const [status, setStatus] = useState({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -151,6 +218,15 @@ export default function StudioEditor() {
         const list = kind === 'listening' ? data.parts : data.passages;
         const filled = list.map(x => ({ ...emptySection(kind), ...x }));
         while (filled.length < meta.count) filled.push(emptySection(kind));
+        if (kind === 'listening') {
+          const one = list.length > 1 && list.every(x => baseUrl(x.audio_url) === baseUrl(list[0].audio_url));
+          setAudioMode(one || list.length === 1 ? 'single' : 'separate');
+          if (one || list.length === 1) {
+            setFullAudio(baseUrl(list[0].audio_url));
+            setStarts(filled.map((x, i) => (i ? fmtTime(startOf(x.audio_url)) : '')));
+            filled.forEach(x => { x.audio_url = ''; });
+          }
+        }
         setSections(filled);
       }
     }).catch(e => setLoadError(e?.response?.status === 404 ? 'This test was not found, or it belongs to another teacher.' : errText(e)))
@@ -170,16 +246,17 @@ export default function StudioEditor() {
   useEffect(() => {
     if (!dirty) return;
     const t = setTimeout(() => {
-      try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), title, sections, writing })); } catch { /* full or blocked */ }
+      try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), title, sections, writing, audioMode, fullAudio, starts })); } catch { /* full or blocked */ }
     }, 800);
     return () => clearTimeout(t);
-  }, [dirty, title, sections, writing, draftKey]);
+  }, [dirty, title, sections, writing, audioMode, fullAudio, starts, draftKey]);
 
   const forgetDraft = keys => keys.forEach(k => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
   const doRestore = () => {
     setTitle(restore.title || '');
     if (kind === 'writing') setWriting(restore.writing || writing);
     else if (restore.sections?.length) setSections(restore.sections);
+    if (restore.audioMode) { setAudioMode(restore.audioMode); setFullAudio(restore.fullAudio || ''); setStarts(restore.starts || ['', '', '', '']); }
     setRestore(null); setDirty(true);
   };
 
@@ -198,12 +275,47 @@ export default function StudioEditor() {
   const usedSections = sections.filter((s, i) => i === 0 || s.questions.trim() || s.answers.trim()
     || (s.audio_url || '').trim() || (s.text || '').trim());
 
+  const listeningParts = () => usedSections.map((s, i) => {
+    if (audioMode !== 'single') return s;
+    const t = parseTime(starts[i]);
+    return { ...s, audio_url: fullAudio ? fullAudio + (i > 0 && t ? `#t=${t}` : '') : '' };
+  });
   const payload = active => (kind === 'writing'
     ? { title, is_active: active, ...writing }
-    : { title, is_active: active, [kind === 'listening' ? 'parts' : 'passages']: usedSections });
+    : kind === 'listening'
+      ? { title, is_active: active, parts: listeningParts() }
+      : { title, is_active: active, passages: usedSections });
+
+  /* Import a whole Listening test from the teacher's PDF / Word file */
+  const runImport = async file => {
+    setImporting(true); setImportNote(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const { data } = await api.post('/studio/import/listening/', fd, { timeout: 180000 });
+      change(() => setSections(prev => prev.map((s, i) => ({ ...s, ...(data.parts[i] || { questions: '', answers: '' }) }))));
+      if (!title.trim()) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim());
+      setTab(0);
+      setImportNote({ ok: true, warnings: data.warnings || [] });
+    } catch (e) {
+      setImportNote({ ok: false, warnings: [errText(e)] });
+    } finally { setImporting(false); }
+  };
+  const pickImport = e => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const hasText = sections.some(s => s.questions.trim() || s.answers.trim());
+    if (hasText) setConfirmImport(f); else runImport(f);
+  };
 
   const save = async active => {
     if (!title.trim()) { setProblem({ title: 'Write the test title first', errors: ['The title is shown to students, e.g. "Mock Test 5".'] }); return null; }
+    if (kind === 'listening' && audioMode === 'single') {
+      const bad = starts.map((x, i) => (i && Number.isNaN(parseTime(x)) ? `Part ${i + 1} start time "${x}" is not a time. Write it like 7:32.` : null)).filter(Boolean);
+      if (!fullAudio) bad.unshift('Upload the audio file (all parts in one file).');
+      if (bad.length && active) { setProblem({ title: "Can't publish yet", errors: bad, canDraft: true }); return null; }
+    }
     setSaving(true); setNotice('');
     try {
       const { data } = isNew
@@ -265,6 +377,32 @@ export default function StudioEditor() {
         </div>
       )}
 
+      {kind === 'listening' && (
+        <>
+          <div className="st-import">
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <b>Have the test as a PDF or Word file?</b>
+              <div className="st-muted" style={{ fontSize: 12.5 }}>Upload it: Part 1–4, the answer key and the pictures are put in their places. Transcripts are skipped.</div>
+            </div>
+            <input ref={importRef} type="file" accept=".pdf,.docx,.txt" hidden onChange={pickImport} />
+            <button className="btn btn-primary" disabled={importing} onClick={() => importRef.current?.click()}>
+              {importing ? 'Reading the file…' : 'Import from PDF / Word'}
+            </button>
+          </div>
+          {importNote && (
+            <div className={importNote.ok ? 'st-import-ok' : 'st-prob-err'} style={{ marginBottom: 14 }}>
+              {importNote.ok && <b>Imported. Check each part in the preview on the right.</b>}
+              {importNote.warnings.map((w, i) => <div key={i}>{w}</div>)}
+              <button className="st-x" onClick={() => setImportNote(null)} aria-label="Close">×</button>
+            </div>
+          )}
+          <AudioPanel mode={audioMode} setMode={m => change(() => setAudioMode(m))}
+            full={fullAudio} setFull={u => change(() => setFullAudio(u))}
+            starts={starts} setStarts={fn => change(() => setStarts(fn))}
+            partsUsed={usedSections.length} />
+        </>
+      )}
+
       {kind !== 'writing' && (
         <>
           <div className="st-tabs">
@@ -282,6 +420,7 @@ export default function StudioEditor() {
           </div>
           {sections.map((s, i) => (
             <SectionEditor key={i} kind={kind} index={i} value={s} visible={tab === i} onStatus={onStatus}
+              singleAudio={kind === 'listening' && audioMode === 'single'}
               onChange={v => change(() => setSections(prev => prev.map((x, j) => (j === i ? v : x))))} />
           ))}
         </>
@@ -352,6 +491,14 @@ export default function StudioEditor() {
         </div>
       </div>
 
+      {confirmImport && (
+        <Modal title="Replace the questions typed now?" onClose={() => setConfirmImport(null)} actions={<>
+          <button className="btn btn-outline" onClick={() => setConfirmImport(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => { const f = confirmImport; setConfirmImport(null); runImport(f); }}>Import and replace</button>
+        </>}>
+          The questions and answers in Part 1–4 are replaced with the ones from "{confirmImport.name}". The audio stays.
+        </Modal>
+      )}
       {problem && (
         <Modal title={problem.title} onClose={() => setProblem(null)} actions={<>
           {problem.canDraft && <button className="btn btn-outline" onClick={() => { setProblem(null); save(false); }}>Save as draft</button>}
