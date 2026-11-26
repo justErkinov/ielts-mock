@@ -5,7 +5,7 @@ from .models import ListeningTest, ListeningAttempt
 import re
 from django.db.models import Count
 from .serializers import ListeningTestSerializer, ListeningTestListSerializer
-from grading import check, display, PairGuard
+from grading import check, display, show, review, PairGuard
 from examutil import can_open, clean_answers, recent_duplicate, is_staff_user
 
 PART_RE = re.compile(r'^(.*?)[\s,–—-]*Part\s*(\d+)\s*$', re.I)
@@ -92,11 +92,7 @@ class ListeningSubmitView(APIView):
             given = user_answers.get(num, '')
             ok = guard.check(given, q.correct_answer, q.question_type)
             score += ok
-            result_detail[num] = {
-                'your_answer': given,
-                'correct_answer': display(q.correct_answer),
-                'is_correct': ok,
-            }
+            result_detail[num] = review(q, given, ok)
 
         attempt = recent_duplicate(ListeningAttempt, request.user, test, answers=user_answers)
         if attempt is None:
@@ -149,7 +145,7 @@ class ListeningGroupSubmitView(APIView):
                 given = answers.get(num, '')
                 ok = guard.check(given, q.correct_answer, q.question_type)
                 part_score += ok
-                detail[num] = {'your_answer': given, 'correct_answer': display(q.correct_answer), 'is_correct': ok}
+                detail[num] = review(q, given, ok)
             if not repeat:
                 ListeningAttempt.objects.create(user=request.user, test=test, answers=answers, score=part_score)
             part_scores.append((test.title, part_score, len(questions)))

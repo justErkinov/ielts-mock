@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from .models import ReadingTest, ReadingAttempt
 from django.db.models import Count
 from .serializers import ReadingTestSerializer, ReadingTestListSerializer
-from grading import check, display, PairGuard
+from grading import check, display, show, review, PairGuard
 from examutil import can_open, clean_answers, recent_duplicate
 
 
@@ -56,11 +56,7 @@ class ReadingSubmitView(APIView):
                 given = user_answers.get(num, '')
                 ok = guard.check(given, q.correct_answer, q.question_type)
                 score += ok
-                result_detail[num] = {
-                    'your_answer': given,
-                    'correct_answer': display(q.correct_answer),
-                    'is_correct': ok,
-                }
+                result_detail[num] = review(q, given, ok)
 
         attempt = recent_duplicate(ReadingAttempt, request.user, test, answers=user_answers)
         if attempt is None:

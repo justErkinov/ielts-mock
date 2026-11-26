@@ -274,7 +274,8 @@ export default function ListeningTest() {
   if (result) return (
     <div className="container">
       <ScoreCard kind="listening" title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')}
-        score={result.score} total={result.total} detail={result.detail} onBack={() => navigate('/listening')} />
+        score={result.score} total={result.total} detail={result.detail} onBack={() => navigate('/listening')}
+        sections={parts.map(p => ({ label: `Part ${p.part}`, nums: p.questions.map(q => q.question_number) }))} />
     </div>
   );
   if (!started && preview) return <PreviewGate prep={prep} title={parts[0].title.replace(/[\s,–—-]*Part\s*\d+\s*$/i, '')} onStart={() => { startedAt.current = Date.now(); setStarted(true); }} />;

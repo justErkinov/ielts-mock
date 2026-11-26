@@ -341,6 +341,7 @@ export default function ReadingTest() {
   if (result) return (
     <div className="container">
       <ScoreCard kind="reading" title={test.title} score={result.score} total={result.total} detail={result.detail}
+        sections={(test.passages || []).map((p, i) => ({ label: `Passage ${i + 1}`, nums: p.questions.map(q => q.question_number) }))}
         onBack={() => navigate('/reading')} />
     </div>
   );
