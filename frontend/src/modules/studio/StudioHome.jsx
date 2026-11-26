@@ -46,7 +46,7 @@ export default function StudioHome() {
       <style>{STUDIO_CSS}</style>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Test studio</h2>
       <p className="text-muted" style={{ marginBottom: 20 }}>
-        Add a test by pasting the questions and the answer key from the book. Students only see a test after you publish it.
+        Add a test from a PDF or Word file, or by pasting the questions and the answer key. Students only see a test after you publish it.
       </p>
 
       <div className="st-new">
@@ -54,7 +54,7 @@ export default function StudioHome() {
           <Link key={k} to={`/studio/${k}/new`}>
             <div style={{ fontSize: 22 }}>{v.icon}</div>
             <b>New {v.label} test</b>
-            <span>{k === 'listening' ? '4 parts, audio for each part' : k === 'reading' ? '3 passages, 40 questions' : 'Task 1 with a picture, Task 2'}</span>
+            <span>{k === 'listening' ? '4 parts · import from PDF / Word · one audio file' : k === 'reading' ? '3 passages, 40 questions' : 'Task 1 with a picture, Task 2'}</span>
           </Link>
         ))}
       </div>

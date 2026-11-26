@@ -236,7 +236,10 @@ def parse_questions(text):
         elif not qs:
             g['instr'].append(stripped)
         elif q and not q['gap'] and q['options'] is None and not g['shared'] and not g['pending'] \
-                and not (i + 1 < len(lines) and _option_run(lines, i + 1)[0]):
+                and (not (i + 1 < len(lines) and _option_run(lines, i + 1)[0])
+                     or stripped.endswith(('?', '.', ':')) or stripped[:1].islower()):
+            # the question went on to the next line ("... systems in" / "Granford?");
+            # a short title before a list of options ("List of Ideas") is not part of it
             if re.search(BLANK, stripped):
                 q['text'], q['gap'] = _blanks(q['text'] + ' ' + stripped), True
             else:

@@ -5,8 +5,14 @@ import api from '../../services/api';
 export default function WritingList() {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { api.get('/writing/').then(r => setTests(r.data)).finally(() => setLoading(false)); }, []);
+  const [loadError, setLoadError] = useState(false);
+  useEffect(() => { api.get('/writing/').then(r => setTests(r.data))
+      .catch(() => setLoadError(true)).finally(() => setLoading(false)); }, []);
   if (loading) return <div className="container"><p className="text-muted">Loading...</p></div>;
+  if (loadError) return (
+    <div className="container"><p>The tests could not be loaded. Check the internet connection.</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button></div>
+  );
   return (
     <div className="container">
       <div style={{ marginBottom: 24 }}>

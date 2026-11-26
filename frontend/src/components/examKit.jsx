@@ -267,6 +267,16 @@ export const EXAM_CSS = `
 .rx-subhead { font-weight: 700; margin: 12px 0 4px; font-size: 15px; }
 .rx-noteline { margin: 4px 0; font-size: 15px; line-height: 1.6; }
 .rx-notes > div:first-child > .rx-subhead:first-child { margin-top: 0; }
+@media (max-width:760px){
+  .rx-main{flex-direction:column}
+  .rx-left{width:100% !important;max-height:42vh;border-bottom:3px solid #e5e7eb}
+  .rx-divider{display:none}
+  .rx-left,.rx-right{padding:14px}
+  .rx-header{gap:10px;padding:0 12px}
+  .rx-title,.rx-taker{display:none}
+  .rx-passage p{text-align:left}
+  .rx-gap{max-width:44vw}
+}
 .rx-gapline{line-height:2.4;font-size:14.5px;scroll-margin:90px}
 .rx-bullet{color:#6b7280}
 .rx-gap{width:150px;height:30px;margin:0 6px;border:1px solid #9ca3af;border-radius:4px;padding:0 8px;font-size:14.5px;

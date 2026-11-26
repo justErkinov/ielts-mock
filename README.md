@@ -39,3 +39,17 @@ TELEGRAM_CHAT_ID=...
 3. Brauzerda oching:
    https://api.telegram.org/bot<TOKEN>/getUpdates
 4. "id" qiymatini oling (masalan: -1001234567890)
+
+
+## Checking that everything works
+
+Automatic tests cover grading, the teacher studio (pasting, import from PDF/Word,
+uploads), sign-in, drafts, submitting and the answer review:
+
+```bash
+cd backend
+python manage.py test tests
+```
+
+GitHub runs the same tests and a frontend build on every push (see the
+"Actions" tab of the repository). A red cross there means something broke.

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import Login from './pages/Login';
@@ -12,6 +12,16 @@ import WritingList from './modules/writing/WritingList';
 import WritingTest from './modules/writing/WritingTest';
 import StudioHome from './modules/studio/StudioHome';
 import StudioEditor from './modules/studio/StudioEditor';
+
+function NotFound() {
+  return (
+    <div className="container" style={{ textAlign: 'center', padding: '80px 20px' }}>
+      <h2 style={{ fontSize: 22, marginBottom: 8 }}>Page not found</h2>
+      <p className="text-muted" style={{ marginBottom: 20 }}>This address does not exist. Check the link or go back to the tests.</p>
+      <Link to="/" className="btn btn-primary">Go to the home page</Link>
+    </div>
+  );
+}
 
 function TeacherRoute({ children }) {
   const { user } = useAuth();
@@ -43,6 +53,7 @@ export default function App() {
                 <Route path="/writing/:id" element={<WritingTest />} />
                 <Route path="/studio" element={<TeacherRoute><StudioHome /></TeacherRoute>} />
                 <Route path="/studio/:kind/:id" element={<TeacherRoute><StudioEditor /></TeacherRoute>} />
+                <Route path="*" element={<NotFound />} />
               </Routes>
             </>
           </PrivateRoute>

@@ -143,3 +143,13 @@ mark.user-hl:hover { outline: 1px dashed var(--accent); }
   .container { padding: 14px; }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+/* Navbar on phones: logo only, links scroll sideways inside the bar, no page overflow */
+@media (max-width: 720px) {
+  .nav-bar { padding: 0 10px !important; gap: 8px; }
+  .nav-brand-text, .nav-user, .nav-sep { display: none !important; }
+  .nav-right { min-width: 0; flex: 1; justify-content: flex-end; }
+  .nav-links { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a { padding: 6px 8px !important; font-size: 13px !important; white-space: nowrap; }
+}

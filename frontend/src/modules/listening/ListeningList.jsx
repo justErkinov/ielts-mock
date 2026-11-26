@@ -6,12 +6,18 @@ import { groupTests } from './groups';
 export default function ListeningList() {
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    api.get('/listening/').then(r => setTests(r.data)).finally(() => setLoading(false));
+    api.get('/listening/').then(r => setTests(r.data))
+      .catch(() => setLoadError(true)).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="container"><p className="text-muted">Loading...</p></div>;
+  if (loadError) return (
+    <div className="container"><p>The tests could not be loaded. Check the internet connection.</p>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => window.location.reload()}>Try again</button></div>
+  );
 
   return (
     <div className="container">

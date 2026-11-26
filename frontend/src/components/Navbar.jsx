@@ -27,7 +27,7 @@ export default function Navbar() {
   if (/^\/(listening|reading|writing)\/[^/]+/.test(location.pathname)) return null;
 
   return (
-    <nav style={{
+    <nav className="nav-bar" style={{
       background: 'var(--card)',
       borderBottom: '1px solid var(--border)',
       padding: '0 24px',
@@ -45,20 +45,21 @@ export default function Navbar() {
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
         <img src="/al-jabr-logo.png" alt="AL-JABR" width="40" height="40"
           style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0 }} />
-        <div style={{ minWidth: 92 }}>
+        <div className="nav-brand-text" style={{ minWidth: 92 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)', lineHeight: 1.1, transition: 'all 0.2s' }}>
             {hover ? 'AL-JABR' : 'IELTS Mock'}
           </div>
           {hover && (
             <div style={{ fontSize: 10, color: 'var(--text2)', letterSpacing: '0.05em' }}>
-              International School
+              International Finance Professional School
             </div>
           )}
         </div>
       </Link>
 
       {user ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div className="nav-right" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div className="nav-links" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           {navLinks.map(l => (
             <Link key={l.path} to={l.path} style={{
               textDecoration: 'none',
@@ -71,12 +72,13 @@ export default function Navbar() {
               transition: 'all 0.15s',
             }}>{l.label}</Link>
           ))}
-          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 6px' }} />
+          </div>
+          <div className="nav-sep" style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 6px' }} />
           {/* Dark mode toggle */}
           <button onClick={() => setDark(d => !d)} className="btn btn-ghost btn-sm" title="Toggle dark mode">
             {dark ? '☀️' : '🌙'}
           </button>
-          <span style={{ fontSize: 13, color: 'var(--text2)', padding: '0 4px' }}>
+          <span className="nav-user" style={{ fontSize: 13, color: 'var(--text2)', padding: '0 4px' }}>
             {user.username}
           </span>
           <button onClick={handleLogout} className="btn btn-outline btn-sm">Sign out</button>

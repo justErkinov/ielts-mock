@@ -16,7 +16,8 @@ export default function Login() {
     try {
       const res = await api.post('/users/login/', form);
       login(res.data.user, res.data.token);
-      navigate('/');
+      const next = new URLSearchParams(window.location.search).get('next');
+      navigate(next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
     } catch (err) {
       setError(err.response?.data?.error || 'Incorrect username or password');
     } finally { setLoading(false); }
@@ -43,6 +44,9 @@ export default function Login() {
               <label>Password</label>
               <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="••••••••" required />
             </div>
+            {!error && new URLSearchParams(window.location.search).get('expired') && (
+              <p className="text-muted" style={{ marginBottom: 12 }}>You were signed out. Please sign in again to continue.</p>
+            )}
             {error && <p className="error" style={{ marginBottom: 12 }}>{error}</p>}
             <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: 11 }} disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In →'}
